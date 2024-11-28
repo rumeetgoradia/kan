@@ -1,0 +1,8 @@
+.DS_Store
+.idea/
+__pycache__/
+
+# Ignore all directories under data/
+data/*/
+# But don't ignore Python files directly under data/
+!data/*.py

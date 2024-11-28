@@ -1,5 +1,5 @@
 import numpy as np
-from loss.loss_template import Loss
+from .loss_template import Loss
 
 
 class SquaredLoss(Loss):

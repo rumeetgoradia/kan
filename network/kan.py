@@ -1,221 +1,223 @@
-import logging
-import time
-
-import keras
-import numpy as np
-from keras.layers import Dense, Dropout
-from keras.models import Sequential
-from keras.optimizers import Adam
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import tensorflow as tf
 
 
-class TKANCell(keras.layers.Layer):
-    def __init__(self, units, input_dim, kan_layer_class, kan_params,
-                 activation='tanh', recurrent_activation='sigmoid',
-                 use_bias=True, dropout=0.0, recurrent_dropout=0.0, **kwargs):
-        super().__init__(**kwargs)
-        self.units = units
-        self.input_dim = input_dim
-        self.kan_layer_class = kan_layer_class
-        self.kan_params = kan_params
-        self.activation = keras.activations.get(activation)
-        self.recurrent_activation = keras.activations.get(recurrent_activation)
-        self.use_bias = use_bias
-        self.dropout = dropout
-        self.recurrent_dropout = recurrent_dropout
+class BaseKANLayer(tf.keras.layers.Layer):
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        pass
 
-        self.state_size = [units, units, units]  # [h, c, kan_state]
-        self.output_size = units
+
+class ChebyshevKANLayer(BaseKANLayer):
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_cheb=1.0):
+        super().__init__()
+        self.out_features = out_features
+        self.degree = degree
+        self.scale_base = scale_base
+        self.scale_cheb = scale_cheb
 
     def build(self, input_shape):
-        input_dim = input_shape[-1]
+        in_features = input_shape[-1]
+        self.base_weight = self.add_weight(
+            "base_weight",
+            shape=(in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            trainable=True
+        )
+        self.cheb_weight = self.add_weight(
+            "cheb_weight",
+            shape=(in_features, self.out_features, self.degree),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_cheb),
+            trainable=True
+        )
 
-        self.kernel = self.add_weight(shape=(input_dim, self.units * 4),
-                                      name='kernel',
-                                      initializer='glorot_uniform')
-        self.recurrent_kernel = self.add_weight(shape=(self.units, self.units * 4),
-                                                name='recurrent_kernel',
-                                                initializer='orthogonal')
-        if self.use_bias:
-            self.bias = self.add_weight(shape=(self.units * 4,),
-                                        name='bias',
-                                        initializer='zeros')
+    def chebyshev_basis(self, x):
+        x_scaled = 2.0 * (x - tf.reduce_min(x)) / (tf.reduce_max(x) - tf.reduce_min(x)) - 1.0
+        T = [tf.ones_like(x_scaled), x_scaled]
+        for i in range(2, self.degree):
+            T.append(2 * x_scaled * T[-1] - T[-2])
+        return tf.stack(T, axis=-1)
 
-        self.kan_layer = self.kan_layer_class(self.units, **self.kan_params)
+    def call(self, x):
+        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        cheb_basis = self.chebyshev_basis(x)
+        cheb_output = tf.reduce_sum(cheb_basis[..., tf.newaxis, :] * self.cheb_weight, axis=-1)
+        return base_output + cheb_output
 
-        self.built = True
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        l1_fake = tf.reduce_mean(tf.abs(self.cheb_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy)
 
-    def call(self, inputs, states, training=None):
-        h_tm1, c_tm1, kan_state = states
+class BSplineKANLayer(BaseKANLayer):
+    def __init__(
+            self,
+            out_features,
+            grid_size=5,
+            spline_order=3,
+            scale_noise=0.1,
+            scale_base=1.0,
+            scale_spline=1.0,
+            enable_standalone_scale_spline=True,
+            base_activation=tf.nn.silu,
+            grid_eps=0.02,
+            grid_range=[-1, 1],
+    ):
+        super(BSplineKANLayer, self).__init__()
+        self.out_features = out_features
+        self.grid_size = grid_size
+        self.spline_order = spline_order
+        self.scale_noise = scale_noise
+        self.scale_base = scale_base
+        self.scale_spline = scale_spline
+        self.enable_standalone_scale_spline = enable_standalone_scale_spline
+        self.base_activation = base_activation
+        self.grid_eps = grid_eps
+        self.grid_range = grid_range
 
-        if 0 < self.dropout < 1 and training:
-            inputs = keras.backend.dropout(inputs, self.dropout)
+    def build(self, input_shape):
+        self.in_features = input_shape[-1]
 
-        z = keras.backend.dot(inputs, self.kernel)
-        z += keras.backend.dot(h_tm1, self.recurrent_kernel)
-        if self.use_bias:
-            z = keras.backend.bias_add(z, self.bias)
+        h = (self.grid_range[1] - self.grid_range[0]) / self.grid_size
+        grid = (
+                tf.range(-self.spline_order, self.grid_size + self.spline_order + 1, dtype=tf.float32) * h
+                + self.grid_range[0]
+        )
+        self.grid = tf.tile(tf.expand_dims(grid, 0), [self.in_features, 1])
 
-        z0, z1, z2, z3 = keras.backend.split(z, 4, axis=-1)
+        self.base_weight = self.add_weight(
+            "base_weight",
+            shape=(self.in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            trainable=True
+        )
+        self.spline_weight = self.add_weight(
+            "spline_weight",
+            shape=(self.out_features, self.in_features, self.grid_size + self.spline_order),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_spline),
+            trainable=True
+        )
+        if self.enable_standalone_scale_spline:
+            self.spline_scaler = self.add_weight(
+                "spline_scaler",
+                shape=(self.out_features, self.in_features),
+                initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_spline),
+                trainable=True
+            )
 
-        i = self.recurrent_activation(z0)
-        f = self.recurrent_activation(z1)
-        c = f * c_tm1 + i * self.activation(z2)
-        o = self.recurrent_activation(z3)
+        self.reset_parameters()
 
-        h = o * self.activation(c)
+    def reset_parameters(self):
+        noise = (
+                        tf.random.uniform((self.grid_size + 1, self.in_features, self.out_features))
+                        - 1 / 2
+                ) * self.scale_noise / self.grid_size
 
-        kan_output, new_kan_state = self.kan_layer(inputs, kan_state)
+        x = self.grid[self.spline_order:-self.spline_order]
+        coeff = self.curve2coeff(x, noise)
 
-        output = keras.layers.concatenate([h, kan_output])
-        output = keras.layers.Dense(self.units)(output)
+        if not self.enable_standalone_scale_spline:
+            coeff *= self.scale_spline
 
-        return output, [h, c, new_kan_state]
+        self.spline_weight.assign(tf.transpose(coeff, [2, 1, 0]))
 
-    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
-        return [keras.backend.zeros((batch_size, self.units)),
-                keras.backend.zeros((batch_size, self.units)),
-                keras.backend.zeros((batch_size, self.units))]
+    @tf.function
+    def b_splines(self, x):
+        x = tf.expand_dims(x, -1)
+        bases = tf.cast(
+            (x >= self.grid[:, :-1]) & (x < self.grid[:, 1:]),
+            dtype=tf.float32
+        )
 
+        for k in range(1, self.spline_order + 1):
+            left = (x - self.grid[:, : -(k + 1)]) / (self.grid[:, k:-1] - self.grid[:, : -(k + 1)])
+            right = (self.grid[:, k + 1:] - x) / (self.grid[:, k + 1:] - self.grid[:, 1:-k])
+            bases = left * bases[:, :, :-1] + right * bases[:, :, 1:]
 
-class TKAN(keras.layers.RNN):
-    def __init__(self, units, input_dim, kan_layer_class, kan_params,
-                 activation='tanh', recurrent_activation='sigmoid',
-                 use_bias=True, dropout=0.0, recurrent_dropout=0.0,
-                 return_sequences=False, return_state=False, **kwargs):
-        cell = TKANCell(units, input_dim, kan_layer_class, kan_params,
-                        activation, recurrent_activation, use_bias,
-                        dropout, recurrent_dropout)
-        super().__init__(cell, return_sequences=return_sequences,
-                         return_state=return_state, **kwargs)
+        return bases
 
-    def call(self, inputs, mask=None, training=None, initial_state=None):
-        return super().call(inputs, mask=mask, training=training,
-                            initial_state=initial_state)
+    @tf.function
+    def curve2coeff(self, x, y):
+        A = tf.transpose(self.b_splines(x), [1, 0, 2])
+        B = tf.transpose(y, [1, 0, 2])
 
+        solution = tf.linalg.lstsq(A, B)
+        result = tf.transpose(solution, [2, 0, 1])
 
-def create_model(input_shape, units, kan_layer_class, kan_params, dropout_rate=0.2, output_dim=15):
-    input_dim = input_shape[-1]  # Get the number of features from the input shape
-    model = Sequential([
-        TKAN(units, input_dim, kan_layer_class, kan_params, return_sequences=True, input_shape=input_shape),
-        Dropout(dropout_rate),
-        TKAN(units, units, kan_layer_class, kan_params, return_sequences=True),
-        Dropout(dropout_rate),
-        TKAN(units, units, kan_layer_class, kan_params),
-        Dropout(dropout_rate),
-        Dense(output_dim)
-    ])
-    return model
+        return result
 
+    @property
+    def scaled_spline_weight(self):
+        if self.enable_standalone_scale_spline:
+            return self.spline_weight * tf.expand_dims(self.spline_scaler, -1)
+        return self.spline_weight
 
-def train_model(model, X_train, y_train, X_val, y_val, batch_size, epochs, learning_rate):
-    model.compile(optimizer=Adam(learning_rate=learning_rate), loss='mse')
+    def call(self, x):
+        original_shape = tf.shape(x)
+        x = tf.reshape(x, [-1, self.in_features])
 
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
+        base_output = tf.matmul(self.base_activation(x), self.base_weight)
+        spline_output = tf.matmul(
+            tf.reshape(self.b_splines(x), [tf.shape(x)[0], -1]),
+            tf.reshape(self.scaled_spline_weight, [self.out_features, -1]),
+            transpose_b=True
+        )
+        output = base_output + spline_output
 
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=[early_stopping, lr_scheduler],
-        verbose=1
-    )
+        output = tf.reshape(output, tf.concat([original_shape[:-1], [self.out_features]], axis=0))
+        return output
 
-    return history
+    @tf.function
+    def update_grid(self, x, margin=0.01):
+        batch = tf.shape(x)[0]
 
+        splines = self.b_splines(x)
+        splines = tf.transpose(splines, [1, 0, 2])
+        orig_coeff = tf.transpose(self.scaled_spline_weight, [1, 2, 0])
+        unreduced_spline_output = tf.matmul(splines, orig_coeff)
+        unreduced_spline_output = tf.transpose(unreduced_spline_output, [1, 0, 2])
 
-def evaluate_model(model, X_test, y_test):
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
+        x_sorted = tf.sort(x, axis=0)
+        grid_adaptive = tf.gather(
+            x_sorted,
+            tf.cast(
+                tf.linspace(0, tf.cast(batch - 1, tf.float32), self.grid_size + 1),
+                tf.int32
+            )
+        )
 
-    logger.info(f'Test Results - MSE: {mse:.8f}, MAE: {mae:.8f}, R2: {r2:.8f}')
+        uniform_step = (x_sorted[-1] - x_sorted[0] + 2 * margin) / self.grid_size
+        grid_uniform = (
+                tf.range(self.grid_size + 1, dtype=tf.float32)[:, tf.newaxis]
+                * uniform_step
+                + x_sorted[0]
+                - margin
+        )
 
-    return mse, mae, r2
+        grid = self.grid_eps * grid_uniform + (1 - self.grid_eps) * grid_adaptive
+        grid = tf.concat(
+            [
+                grid[:1]
+                - uniform_step
+                * tf.range(self.spline_order, 0, -1, dtype=tf.float32)[:, tf.newaxis],
+                grid,
+                grid[-1:]
+                + uniform_step
+                * tf.range(1, self.spline_order + 1, dtype=tf.float32)[:, tf.newaxis],
+            ],
+            axis=0
+        )
 
+        self.grid.assign(tf.transpose(grid))
+        self.spline_weight.assign(self.curve2coeff(x, unreduced_spline_output))
 
-def main(X_train_path: str, y_train_path: str, X_test_path: str, y_test_path: str, kan_layer_class, kan_params):
-    start_time = time.time()
-    logger.info("Starting the main function")
-
-    # Load data
-    logger.info("Loading data...")
-    X_train = np.load(X_train_path)
-    y_train = np.load(y_train_path)
-    X_test = np.load(X_test_path)
-    y_test = np.load(y_test_path)
-    logger.info(
-        f"Data loaded. Shapes - X_train: {X_train.shape}, y_train: {y_train.shape}, X_test: {X_test.shape}, y_test: {y_test.shape}")
-
-    # Split training data into train and validation
-    val_size = int(0.2 * len(X_train))
-    X_val, y_val = X_train[-val_size:], y_train[-val_size:]
-    X_train, y_train = X_train[:-val_size], y_train[:-val_size]
-
-    # Hyperparameters
-    batch_size = 64
-    epochs = 100
-    learning_rate = 0.001
-    units = 64
-    dropout_rate = 0.2
-
-    # Get the output dimension from y_train
-    output_dim = y_train.shape[-1]
-
-    # Create and train the model
-    model = create_model(X_train.shape[1:], units, kan_layer_class, kan_params, dropout_rate, output_dim)
-    logger.info(
-        f"Model created with {units} units, dropout rate: {dropout_rate}, KAN layer: {kan_layer_class.__name__}, and KAN params: {kan_params}")
-
-    history = train_model(model, X_train, y_train, X_val, y_val, batch_size, epochs, learning_rate)
-
-    # Evaluate the model
-    mse, mae, r2 = evaluate_model(model, X_test, y_test)
-
-    # Save metrics to file
-    with open('model_metrics.txt', 'w') as f:
-        f.write(f'Mean Squared Error: {mse}\n')
-        f.write(f'Mean Absolute Error: {mae}\n')
-        f.write(f'R-squared Score: {r2}\n')
-
-    logger.info('Testing completed. Metrics saved to model_metrics.txt')
-
-    # Save the model
-    model.save('tkan_model.h5')
-    logger.info('Model saved as tkan_model.h5')
-
-    end_time = time.time()
-    logger.info(f"Total execution time: {end_time - start_time:.2f} seconds")
-
-
-if __name__ == "__main__":
-    from network.kan.bspline import BSplineKANLayer
-
-    # Example usage with BSplineKANLayer
-    bspline_params = {
-        'grid_size': 5,
-        'spline_order': 3,
-        'scale_base': 1.0,
-        'scale_spline': 1.0,
-    }
-    main('../data/prepared/sequenced/X_train.npy', '../data/prepared/sequenced/y_train.npy',
-         '../data/prepared/sequenced/X_test.npy', '../data/prepared/sequenced/y_test.npy',
-         BSplineKANLayer, bspline_params)
-
-    # # Example usage with ChebyshevKANLayer
-    # chebyshev_params = {
-    #     'degree': 5,
-    #     'scale_base': 1.0,
-    #     'scale_cheb': 1.0,
-    # }
-    # main('../data/prepared/sequenced/X_train.npy', '../data/prepared/sequenced/y_train.npy',
-    #      '../data/prepared/sequenced/X_test.npy', '../data/prepared/sequenced/y_test.npy',
-    #      ChebyshevKANLayer, chebyshev_params)
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        l1_fake = tf.reduce_mean(tf.abs(self.spline_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (
+                regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy
+        )

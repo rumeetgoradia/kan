@@ -1,4 +1,21 @@
 import tensorflow as tf
+import numpy as np
+
+
+class KANModel(tf.keras.Model):
+    def train_step(self, data):
+        x, y = data
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+            reg_loss = self.regularization_loss()
+            total_loss = loss + reg_loss
+
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(total_loss, trainable_vars)
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        self.compiled_metrics.update_state(y, y_pred)
+        return {**{m.name: m.result() for m in self.metrics}, "reg_loss": reg_loss}
 
 
 class BaseKANLayer(tf.keras.layers.Layer):
@@ -32,7 +49,7 @@ class ChebyshevKANLayer(BaseKANLayer):
     def chebyshev_basis(self, x):
         x_scaled = 2.0 * (x - tf.reduce_min(x)) / (tf.reduce_max(x) - tf.reduce_min(x)) - 1.0
         T = [tf.ones_like(x_scaled), x_scaled]
-        for i in range(2, self.degree):
+        for _ in range(2, self.degree):
             T.append(2 * x_scaled * T[-1] - T[-2])
         return tf.stack(T, axis=-1)
 
@@ -49,6 +66,7 @@ class ChebyshevKANLayer(BaseKANLayer):
         regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
         return (regularize_activation * regularization_loss_activation
                 + regularize_entropy * regularization_loss_entropy)
+
 
 class BSplineKANLayer(BaseKANLayer):
     def __init__(
@@ -221,3 +239,53 @@ class BSplineKANLayer(BaseKANLayer):
                 regularize_activation * regularization_loss_activation
                 + regularize_entropy * regularization_loss_entropy
         )
+
+
+class FourierKANLayer(BaseKANLayer):
+    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0):
+        super().__init__()
+        self.out_features = out_features
+        self.num_frequencies = num_frequencies
+        self.scale_base = scale_base
+        self.scale_fourier = scale_fourier
+
+    def build(self, input_shape):
+        in_features = input_shape[-1]
+        self.base_weight = self.add_weight(
+            "base_weight",
+            shape=(in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            trainable=True
+        )
+        self.fourier_weight = self.add_weight(
+            "fourier_weight",
+            shape=(in_features, self.out_features, 2 * self.num_frequencies),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_fourier),
+            trainable=True
+        )
+
+    def fourier_basis(self, x):
+        # Normalize x to the range [0, 2π]
+        x_scaled = 2 * np.pi * (x - tf.reduce_min(x)) / (tf.reduce_max(x) - tf.reduce_min(x))
+
+        # Compute sine and cosine terms
+        frequencies = tf.range(1, self.num_frequencies + 1, dtype=tf.float32)
+        sin_terms = tf.sin(frequencies * x_scaled[..., tf.newaxis])
+        cos_terms = tf.cos(frequencies * x_scaled[..., tf.newaxis])
+
+        # Concatenate sine and cosine terms
+        return tf.concat([sin_terms, cos_terms], axis=-1)
+
+    def call(self, x):
+        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        fourier_basis = self.fourier_basis(x)
+        fourier_output = tf.reduce_sum(fourier_basis[..., tf.newaxis, :] * self.fourier_weight, axis=-1)
+        return base_output + fourier_output
+
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        l1_fake = tf.reduce_mean(tf.abs(self.fourier_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy)

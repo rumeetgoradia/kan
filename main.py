@@ -5,18 +5,20 @@ import os
 
 import numpy as np
 import tensorflow as tf
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Dropout, LSTM
+from tensorflow.keras.metrics import R2Score, MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
 from tqdm import tqdm
 
-from data.processor import prepare_data, split_data
+from data.processor import prepare_data
 from data.window_generator import WindowGenerator
-from network.kan import ChebyshevKANLayer, BSplineKANLayer
+from network.kan import ChebyshevKANLayer, BSplineKANLayer, KANModel, FourierKANLayer
 from network.ts_kan import TimeSeriesKAN
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -49,12 +51,23 @@ def create_ts_kan_model(input_shape, output_features, label_width, kan_type='che
         kan_layer = ChebyshevKANLayer(out_features=kan_size, **kan_kwargs)
     elif kan_type.lower() == 'bspline':
         kan_layer = BSplineKANLayer(out_features=kan_size, **kan_kwargs)
+    elif kan_type.lower() == 'fourier':
+        kan_layer = FourierKANLayer(out_features=kan_size, **kan_kwargs)
     else:
         raise ValueError(f"Unsupported KAN type: {kan_type}")
-    model = TimeSeriesKAN(hidden_size=hidden_size, output_size=output_features * label_width, kan_layer=kan_layer)
-    # Add a Reshape layer to the model if necessary
-    model.add(keras.layers.Reshape((label_width, output_features)))
+
+    model = TimeSeriesKAN(hidden_size=hidden_size, output_size=output_features * label_width,
+                          kan_layer=kan_layer)
+    model.__class__ = KANModel  # Add custom train_step to the model
+    model.add(tf.keras.layers.Reshape((label_width, output_features)))
     return model
+
+
+class CustomR2Score(R2Score):
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        y_true = tf.reshape(y_true, [-1, y_true.shape[-1]])
+        y_pred = tf.reshape(y_pred, [-1, y_pred.shape[-1]])
+        return super().update_state(y_true, y_pred, sample_weight)
 
 
 def create_and_compile_model(model_type, input_shape, output_features, label_width, learning_rate=0.001, **kwargs):
@@ -62,13 +75,17 @@ def create_and_compile_model(model_type, input_shape, output_features, label_wid
         model = create_lstm_model(input_shape, output_features, label_width, **kwargs)
     elif model_type.lower() == 'mlp':
         model = create_mlp_model(input_shape, output_features, label_width, **kwargs)
-    elif model_type.lower() in ['chebyshev', 'bspline']:
+    elif model_type.lower() in ['bspline', 'chebyshev', 'fourier']:
         model = create_ts_kan_model(input_shape, output_features, label_width, kan_type=model_type, **kwargs)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.0)
-    model.compile(optimizer=optimizer, loss='mse')
+    model.compile(optimizer=optimizer, loss=tf.keras.losses.MeanSquaredError(),
+                  metrics=[MeanAbsoluteError(name='mae'),
+                           MeanSquaredError(name='mse'),
+                           RootMeanSquaredError(name='rmse'),
+                           CustomR2Score(name='r2')])
     return model
 
 
@@ -82,29 +99,20 @@ def train_model(model, train_data, val_data, epochs):
 
     class NanCallback(tf.keras.callbacks.Callback):
         def on_batch_end(self, batch, logs=None):
-            if np.isnan(logs.get('loss')):
-                print(f"NaN loss encountered at batch {batch}")
-                self.model.stop_training = True
+            if logs is not None and 'loss' in logs:
+                if np.isnan(logs['loss']):
+                    print(f"NaN loss encountered at batch {batch}")
+                    self.model.stop_training = True
+            else:
+                print(f"Warning: No logs available at batch {batch}")
 
-    def filter_nans(x, y):
-        is_finite = tf.reduce_all(tf.math.is_finite(x)) & tf.reduce_all(tf.math.is_finite(y))
-        return is_finite
-
-    logger.info("Removing NaNs from data...")
-    filtered_train_data = train_data.batch(32).filter(filter_nans).unbatch()
-    filtered_val_data = val_data.batch(32).filter(filter_nans).unbatch()
-
-    # Calculate steps per epoch
-    train_steps = sum(1 for _ in filtered_train_data)
-    val_steps = sum(1 for _ in filtered_val_data)
-
+    # Use mixed precision
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
     logger.info("Training model...")
     history = model.fit(
-        filtered_train_data,
-        validation_data=filtered_val_data,
+        train_data,
+        validation_data=val_data,
         epochs=epochs,
-        steps_per_epoch=train_steps,
-        validation_steps=val_steps,
         callbacks=[early_stopping, lr_scheduler, NanCallback()],
         verbose=1
     )
@@ -114,51 +122,43 @@ def train_model(model, train_data, val_data, epochs):
 def evaluate_model(model, test_data):
     y_true = []
     y_pred = []
-    for x, y in test_data:
+    for x, y in tqdm(test_data, desc="Evaluating"):
         y_true.append(y.numpy())
-        y_pred.append(model.predict(x))
+        pred = model.predict(x, verbose=0)
+        if np.isnan(pred).any():
+            logger.warning("NaN values found in model predictions")
+        y_pred.append(pred)
 
     y_true = np.concatenate(y_true)
     y_pred = np.concatenate(y_pred)
 
-    mse = tf.keras.metrics.mean_squared_error(y_true, y_pred).numpy()
-    mae = tf.keras.metrics.mean_absolute_error(y_true, y_pred).numpy()
+    # Check for NaN values
+    if np.isnan(y_true).any() or np.isnan(y_pred).any():
+        logger.warning("NaN values found in true values or predictions")
+
+    # Flatten the arrays
+    y_true_flat = y_true.reshape(-1, y_true.shape[-1])
+    y_pred_flat = y_pred.reshape(-1, y_pred.shape[-1])
+
+    # Calculate metrics
+    mse = mean_squared_error(y_true_flat, y_pred_flat)
+    mae = mean_absolute_error(y_true_flat, y_pred_flat)
     rmse = np.sqrt(mse)
+    r2 = r2_score(y_true_flat, y_pred_flat)
 
-    # R2 score calculation
-    ss_res = np.sum((y_true - y_pred) ** 2)
-    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-    r2 = 1 - (ss_res / (ss_tot + 1e-7))  # adding small epsilon to avoid division by zero
-
-    return {
-        'mse': float(mse),
-        'mae': float(mae),
-        'rmse': float(rmse),
-        'r2': float(r2)
+    metrics = {
+        'mse': mse,
+        'mae': mae,
+        'rmse': rmse,
+        'r2': r2
     }
+    return metrics
 
 
 def save_metrics(metrics, file_path):
     with open(file_path, 'w') as f:
-        for key, value in metrics.items():
-            f.write(f'{key}: {value}\n')
-
-
-def combine_windows(windows):
-    combined_train = windows[0].train
-    combined_val = windows[0].val
-    combined_test = windows[0].test
-
-    for window in windows[1:]:
-        combined_train = combined_train.concatenate(window.train)
-        combined_val = combined_val.concatenate(window.val)
-        combined_test = combined_test.concatenate(window.test)
-
-    combined_train = combined_train.shuffle(buffer_size=10000)
-    combined_val = combined_val.shuffle(buffer_size=10000)
-    combined_test = combined_test.shuffle(buffer_size=10000)
-
-    return combined_train, combined_val, combined_test
+        for metric_name, value in metrics.items():
+            f.write(f'{metric_name}: {value}\n')
 
 
 def get_or_create_ticker_split(df, train_test_ratio, file_path='ticker_split.json'):
@@ -184,64 +184,39 @@ def get_or_create_ticker_split(df, train_test_ratio, file_path='ticker_split.jso
     return train_tickers, test_tickers
 
 
-def main(model_type, kan_type=None, train=True):
+def main(model_type, train=True):
     tf.keras.backend.set_floatx('float64')
-
     # Parameters
     input_width = 30
     label_width = 5
     shift = 5
     train_test_ratio = 0.8
-
     logger.info("Preparing data...")
-    df, input_features, output_features, _, _, _ = prepare_data(
-        stock_file='data/processed/sp500.csv',
-        market_file='data/processed/market.csv'
+    df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
+        'data/processed/sp500.csv',
+        'data/processed/market.csv'
     )
-
     logger.info("Getting train/test ticker split...")
     train_tickers, test_tickers = get_or_create_ticker_split(df, train_test_ratio)
-
-    logger.info("Creating windows for each ticker...")
-    train_windows = []
-    test_windows = []
-
-    for ticker in tqdm(train_tickers, desc="Windowing train tickers"):
-        train_df, val_df, _ = split_data(df[df['ticker'] == ticker], ticker)
-        window = WindowGenerator(
-            input_width=input_width,
-            label_width=label_width,
-            shift=shift,
-            train_df=train_df,
-            val_df=val_df,
-            test_df=val_df,
-            input_features=input_features,
-            output_features=output_features
-        )
-        train_windows.append(window)
-
-    for ticker in tqdm(test_tickers, desc="Windowing test tickers"):
-        _, _, test_df = split_data(df[df['ticker'] == ticker], ticker)
-        window = WindowGenerator(
-            input_width=input_width,
-            label_width=label_width,
-            shift=shift,
-            train_df=test_df,
-            val_df=test_df,
-            test_df=test_df,
-            input_features=input_features,
-            output_features=output_features
-        )
-        test_windows.append(window)
-
-    logger.info("Combining and shuffling windows...")
-    train_data, val_data, _ = combine_windows(train_windows)
-    _, _, test_data = combine_windows(test_windows)
-
+    # Create WindowGenerator for all data
+    window_generator = WindowGenerator(
+        input_width=input_width,
+        label_width=label_width,
+        shift=shift,
+        train_df=df[df['ticker'].isin(train_tickers)],
+        val_df=df[df['ticker'].isin(test_tickers)],
+        test_df=df[df['ticker'].isin(test_tickers)],
+        label_columns=output_features
+    )
+    # Get the datasets
+    train_data = window_generator.train
+    val_data = window_generator.val
+    test_data = window_generator.test
     input_shape = (input_width, len(input_features))
-
     logger.info(f"Creating {model_type} model...")
-    if model_type.lower() in ['chebyshev', 'bspline']:
+
+    if model_type.startswith('kan-'):
+        kan_type = model_type.split('-')[1]
         model = create_and_compile_model(kan_type, input_shape, len(output_features), label_width, learning_rate=0.001,
                                          hidden_size=64, kan_size=32)
     else:
@@ -255,25 +230,18 @@ def main(model_type, kan_type=None, train=True):
     else:
         logger.info("Loading pre-trained model...")
         model = keras.models.load_model(f'results/{model_type}_model.keras')
-
     logger.info("Evaluating model...")
     metrics = evaluate_model(model, test_data)
     save_metrics(metrics, f'results/{model_type}_metrics.txt')
-
     for key, value in metrics.items():
         logger.info(f"{key}: {value}")
-
     logger.info("Process completed successfully.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train or test a model.")
-    parser.add_argument("model_type", choices=['lstm', 'mlp', 'ts_kan'], help="Type of model to use")
-    parser.add_argument("--kan_type", choices=['chebyshev', 'bspline'], help="Type of KAN layer (only for ts_kan)")
+    parser.add_argument("model_type", choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier'],
+                        help="Type of model to use")
     parser.add_argument("--test", action="store_true", help="Test the model instead of training")
     args = parser.parse_args()
-
-    if args.model_type == 'ts_kan' and args.kan_type is None:
-        parser.error("ts_kan model type requires --kan_type")
-
-    main(args.model_type, args.kan_type, not args.test)
+    main(args.model_type, not args.test)

@@ -1,9 +1,9 @@
 import logging
 
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from tqdm import tqdm
-import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,7 +31,7 @@ def load_and_merge_data(stock_file, market_file):
 
 def preprocess_data(df):
     logger.info("Starting data preprocessing...")
-    stock_price_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    stock_price_columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Dividends', 'Stock Splits']
     market_columns = [col for col in df.columns if col.startswith('^') or '=' in col]
     categorical_columns = ['industry', 'sector']
 
@@ -72,12 +72,17 @@ def prepare_data(stock_file, market_file):
     logger.info("Starting data preparation...")
     df = load_and_merge_data(stock_file, market_file)
 
+    logger.info(f"Columns after merging: {df.columns.tolist()}")
+
     df, stock_scalers, market_scaler, encoders = preprocess_data(df)
 
-    # Add this after your data preparation
+    logger.info(f"Columns after preprocessing: {df.columns.tolist()}")
+
     df = df.replace([np.inf, -np.inf], np.nan).dropna()
 
-    stock_price_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    logger.info(f"Columns after removing NaNs: {df.columns.tolist()}")
+
+    stock_price_columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Dividends', 'Stock Splits']
     market_columns = [col for col in df.columns if col.startswith('^') or '=' in col]
     categorical_columns = ['industry', 'sector']
 
@@ -85,6 +90,11 @@ def prepare_data(stock_file, market_file):
     output_features = ['Open', 'Close', 'Volume']
 
     logger.info("Data preparation completed.")
+    logger.info(f"Number of input features: {len(input_features)}")
+    logger.info(f"Input features: {input_features}")
+    logger.info(f"Number of columns in DataFrame: {len(df.columns)}")
+    logger.info(f"Columns in DataFrame: {df.columns.tolist()}")
+
     return df, input_features, output_features, stock_scalers, market_scaler, encoders
 
 

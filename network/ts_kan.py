@@ -37,14 +37,33 @@ class TimeSeriesKAN(tf.keras.Model):
 
         self.attention = AttentionLayer(hidden_size)
         self.kan_layer = kan_layer
+        # Ensure kan_layer is built with the correct input shape
+        self.kan_layer.build((None, None, hidden_size))  # (batch_size, time_steps, hidden_size)
         self.output_layer = tf.keras.layers.Dense(output_size, activation=output_activation)
+        self.reshape = None  # We'll set this in the main.py
 
     def call(self, inputs):
         lstm_out = self.lstm(inputs)
         context_vector = self.attention(lstm_out)
         kan_out = self.kan_layer(context_vector)
         output = self.output_layer(kan_out)
+        if self.reshape is not None:
+            output = self.reshape(output)
         return output
+
+    def train_step(self, data):
+        x, y = data
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+            reg_loss = self.regularization_loss()
+            total_loss = loss + reg_loss
+
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(total_loss, trainable_vars)
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        self.compiled_metrics.update_state(y, y_pred)
+        return {**{m.name: m.result() for m in self.metrics}, "reg_loss": reg_loss}
 
     def regularization_loss(self):
         return self.kan_layer.regularization_loss()

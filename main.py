@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from data.processor import prepare_data
 from data.window_generator import WindowGenerator
-from network.kan import ChebyshevKANLayer, BSplineKANLayer, KANModel, FourierKANLayer
+from network.kan import ChebyshevKANLayer, BSplineKANLayer, FourierKANLayer
 from network.ts_kan import TimeSeriesKAN
 
 # Set up logging
@@ -45,8 +45,8 @@ def create_mlp_model(input_shape, output_features, label_width, units=64, dropou
     return keras.Model(inputs=inputs, outputs=outputs)
 
 
-def create_ts_kan_model(input_shape, output_features, label_width, kan_type='chebyshev', hidden_size=64, kan_size=32,
-                        **kan_kwargs):
+def create_kan_model(input_shape, output_features, label_width, kan_type, hidden_size=64, kan_size=32,
+                     **kan_kwargs):
     if kan_type.lower() == 'chebyshev':
         kan_layer = ChebyshevKANLayer(out_features=kan_size, **kan_kwargs)
     elif kan_type.lower() == 'bspline':
@@ -58,8 +58,7 @@ def create_ts_kan_model(input_shape, output_features, label_width, kan_type='che
 
     model = TimeSeriesKAN(hidden_size=hidden_size, output_size=output_features * label_width,
                           kan_layer=kan_layer)
-    model.__class__ = KANModel  # Add custom train_step to the model
-    model.add(tf.keras.layers.Reshape((label_width, output_features)))
+    model.reshape = tf.keras.layers.Reshape((label_width, output_features))
     return model
 
 
@@ -76,7 +75,7 @@ def create_and_compile_model(model_type, input_shape, output_features, label_wid
     elif model_type.lower() == 'mlp':
         model = create_mlp_model(input_shape, output_features, label_width, **kwargs)
     elif model_type.lower() in ['bspline', 'chebyshev', 'fourier']:
-        model = create_ts_kan_model(input_shape, output_features, label_width, kan_type=model_type, **kwargs)
+        model = create_kan_model(input_shape, output_features, label_width, kan_type=model_type, **kwargs)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -184,55 +183,90 @@ def get_or_create_ticker_split(df, train_test_ratio, file_path='ticker_split.jso
     return train_tickers, test_tickers
 
 
-def main(model_type, train=True):
+def generate_sample_data(num_samples=1000, input_width=30, input_features=43, output_features=3, label_width=5):
+    # Generate random input data
+    X = np.random.randn(num_samples, input_width, input_features)
+
+    # Generate random output data
+    y = np.random.randn(num_samples, label_width, output_features)
+
+    # Split into train, validation, and test sets
+    train_split = int(0.7 * num_samples)
+    val_split = int(0.85 * num_samples)
+
+    X_train, y_train = X[:train_split], y[:train_split]
+    X_val, y_val = X[train_split:val_split], y[train_split:val_split]
+    X_test, y_test = X[val_split:], y[val_split:]
+
+    # Create TensorFlow datasets
+    train_data = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(32)
+    val_data = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(32)
+    test_data = tf.data.Dataset.from_tensor_slices((X_test, y_test)).batch(32)
+
+    return train_data, val_data, test_data, input_features, output_features
+
+
+def main(model_type, train=True, use_sample_data=False):
     tf.keras.backend.set_floatx('float64')
     # Parameters
     input_width = 30
     label_width = 5
     shift = 5
-    train_test_ratio = 0.8
-    logger.info("Preparing data...")
-    df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
-        'data/processed/sp500.csv',
-        'data/processed/market.csv'
-    )
-    logger.info("Getting train/test ticker split...")
-    train_tickers, test_tickers = get_or_create_ticker_split(df, train_test_ratio)
-    # Create WindowGenerator for all data
-    window_generator = WindowGenerator(
-        input_width=input_width,
-        label_width=label_width,
-        shift=shift,
-        train_df=df[df['ticker'].isin(train_tickers)],
-        val_df=df[df['ticker'].isin(test_tickers)],
-        test_df=df[df['ticker'].isin(test_tickers)],
-        label_columns=output_features
-    )
-    # Get the datasets
-    train_data = window_generator.train
-    val_data = window_generator.val
-    test_data = window_generator.test
-    input_shape = (input_width, len(input_features))
-    logger.info(f"Creating {model_type} model...")
 
+    if use_sample_data:
+        logger.info("Generating sample data...")
+        train_data, val_data, test_data, input_features, output_features = generate_sample_data(
+            input_width=input_width, label_width=label_width)
+    else:
+        # Your existing data preparation code
+        train_test_ratio = 0.8
+        logger.info("Preparing data...")
+        df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
+            'data/processed/sp500.csv',
+            'data/processed/market.csv'
+        )
+        logger.info("Getting train/test ticker split...")
+        train_tickers, test_tickers = get_or_create_ticker_split(df, train_test_ratio)
+        # Create WindowGenerator for all data
+        window_generator = WindowGenerator(
+            input_width=input_width,
+            label_width=label_width,
+            shift=shift,
+            train_df=df[df['ticker'].isin(train_tickers)],
+            val_df=df[df['ticker'].isin(test_tickers)],
+            test_df=df[df['ticker'].isin(test_tickers)],
+            label_columns=output_features
+        )
+        # Get the datasets
+        train_data = window_generator.train
+        val_data = window_generator.val
+        test_data = window_generator.test
+        output_features = len(output_features)
+
+    input_shape = (input_width, input_features)
+    logger.info(f"Creating {model_type} model...")
     if model_type.startswith('kan-'):
         kan_type = model_type.split('-')[1]
-        model = create_and_compile_model(kan_type, input_shape, len(output_features), label_width, learning_rate=0.001,
+        model = create_and_compile_model(kan_type, input_shape, output_features, label_width, learning_rate=0.001,
                                          hidden_size=64, kan_size=32)
     else:
-        model = create_and_compile_model(model_type, input_shape, len(output_features), label_width,
+        model = create_and_compile_model(model_type, input_shape, output_features, label_width,
                                          learning_rate=0.001)
 
-    if train:
+    if train or use_sample_data:
         train_model(model, train_data, val_data, epochs=100)
-        logger.info("Saving model...")
-        model.save(f'results/{model_type}_model.keras')
+        if not use_sample_data:
+            logger.info("Saving model...")
+            model.save(f'results/{model_type}_model.keras')
     else:
         logger.info("Loading pre-trained model...")
         model = keras.models.load_model(f'results/{model_type}_model.keras')
+
     logger.info("Evaluating model...")
     metrics = evaluate_model(model, test_data)
-    save_metrics(metrics, f'results/{model_type}_metrics.txt')
+    if not use_sample_data:
+        save_metrics(metrics, f'results/{model_type}_metrics.txt')
+
     for key, value in metrics.items():
         logger.info(f"{key}: {value}")
     logger.info("Process completed successfully.")
@@ -243,5 +277,6 @@ if __name__ == "__main__":
     parser.add_argument("model_type", choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier'],
                         help="Type of model to use")
     parser.add_argument("--test", action="store_true", help="Test the model instead of training")
+    parser.add_argument("--sample", action="store_true", help="Use sample data for quick testing")
     args = parser.parse_args()
-    main(args.model_type, not args.test)
+    main(args.model_type, not args.test, args.sample)

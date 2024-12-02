@@ -18,7 +18,7 @@ class AttentionLayer(tf.keras.layers.Layer):
 
 
 class TimeSeriesKAN(tf.keras.Model):
-    def __init__(self, hidden_size, output_size, kan_layer, num_lstm_layers=1, lstm_kwargs=None,
+    def __init__(self, hidden_size, output_size, kan_layer, num_lstm_layers=1, lstm_kwargs=None, dropout_rate=0.1,
                  output_activation=None):
         super(TimeSeriesKAN, self).__init__()
 
@@ -34,19 +34,24 @@ class TimeSeriesKAN(tf.keras.Model):
                                                                       **lstm_kwargs)])
         else:
             self.lstm = tf.keras.layers.LSTM(hidden_size, return_sequences=True, **lstm_kwargs)
+            self.layer_norm = tf.keras.layers.LayerNormalization()
 
         self.attention = AttentionLayer(hidden_size)
         self.kan_layer = kan_layer
         # Ensure kan_layer is built with the correct input shape
         self.kan_layer.build((None, None, hidden_size))  # (batch_size, time_steps, hidden_size)
         self.output_layer = tf.keras.layers.Dense(output_size, activation=output_activation)
-        self.reshape = None  # We'll set this in the main.py
+        self.reshape = None
+        self.residual_layer = tf.keras.layers.Dense(output_size)
+        self.dropout = tf.keras.layers.Dropout(dropout_rate)
 
     def call(self, inputs):
-        lstm_out = self.lstm(inputs)
+        lstm_out = self.layer_norm(self.lstm(inputs))
         context_vector = self.attention(lstm_out)
-        kan_out = self.kan_layer(context_vector)
+        kan_out = self.dropout(self.kan_layer(context_vector))
         output = self.output_layer(kan_out)
+        residual = self.residual_layer(context_vector)
+        output = output + residual
         if self.reshape is not None:
             output = self.reshape(output)
         return output

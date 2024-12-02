@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 class WindowGenerator:
     def __init__(self, input_width, label_width, shift,
-                 train_df, val_df, test_df,
+                 train_df=None, val_df=None, test_df=None,
                  label_columns=None):
         # Store the raw data
         self.train_df = train_df
@@ -20,10 +20,15 @@ class WindowGenerator:
         # Work out the label column indices
         self.label_columns = label_columns
         if label_columns is not None:
-            self.label_columns_indices = {name: i for i, name in
-                                          enumerate(label_columns)}
-        self.column_indices = {name: i for i, name in
-                               enumerate(train_df.columns)}
+            self.label_columns_indices = {name: i for i, name in enumerate(label_columns)}
+        # Determine which DataFrame to use for column indices
+        if train_df is not None:
+            df_for_columns = train_df
+        elif val_df is not None:
+            df_for_columns = val_df
+        else:
+            df_for_columns = test_df
+        self.column_indices = {name: i for i, name in enumerate(df_for_columns.columns)}
         # Work out the window parameters
         self.input_width = input_width
         self.label_width = label_width
@@ -91,12 +96,12 @@ class WindowGenerator:
 
     @property
     def train(self):
-        return self.make_dataset(self.train_df)
+        return self.make_dataset(self.train_df) if self.train_df is not None else None
 
     @property
     def val(self):
-        return self.make_dataset(self.val_df)
+        return self.make_dataset(self.val_df) if self.val_df is not None else None
 
     @property
     def test(self):
-        return self.make_dataset(self.test_df)
+        return self.make_dataset(self.test_df) if self.test_df is not None else None

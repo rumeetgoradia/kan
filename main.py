@@ -11,10 +11,11 @@ from tensorflow import keras
 from tensorflow.keras.layers import Dense, Dropout, LSTM
 from tensorflow.keras.metrics import R2Score, MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
 from tqdm import tqdm
+import time
 
-from data.processor import prepare_data
+from data.processor import prepare_data, get_ticker_split
 from data.window_generator import WindowGenerator
-from network.kan import ChebyshevKANLayer, BSplineKANLayer, FourierKANLayer
+from network.kan import ChebyshevKANLayer, BSplineKANLayer, FourierKANLayer, LegendreKANLayer, WaveletKANLayer
 from network.ts_kan import TimeSeriesKAN
 
 # Set up logging
@@ -53,6 +54,10 @@ def create_kan_model(input_shape, output_features, label_width, kan_type, hidden
         kan_layer = BSplineKANLayer(out_features=kan_size, **kan_kwargs)
     elif kan_type.lower() == 'fourier':
         kan_layer = FourierKANLayer(out_features=kan_size, **kan_kwargs)
+    elif kan_type.lower() == 'legendre':
+        kan_layer = LegendreKANLayer(out_features=kan_size, **kan_kwargs)
+    elif kan_type.lower() == 'wavelet':
+        kan_layer = WaveletKANLayer(out_features=kan_size, **kan_kwargs)
     else:
         raise ValueError(f"Unsupported KAN type: {kan_type}")
 
@@ -108,6 +113,9 @@ def train_model(model, train_data, val_data, epochs):
     # Use mixed precision
     tf.keras.mixed_precision.set_global_policy('mixed_float16')
     logger.info("Training model...")
+
+    start_time = time.time()  # Start timing
+
     history = model.fit(
         train_data,
         validation_data=val_data,
@@ -115,7 +123,11 @@ def train_model(model, train_data, val_data, epochs):
         callbacks=[early_stopping, lr_scheduler, NanCallback()],
         verbose=1
     )
-    return history
+
+    end_time = time.time()  # End timing
+    training_time = end_time - start_time
+
+    return history, training_time
 
 
 def evaluate_model(model, test_data):
@@ -160,28 +172,6 @@ def save_metrics(metrics, file_path):
             f.write(f'{metric_name}: {value}\n')
 
 
-def get_or_create_ticker_split(df, train_test_ratio, file_path='ticker_split.json'):
-    if os.path.exists(file_path):
-        logger.info(f"Loading existing ticker split from {file_path}")
-        with open(file_path, 'r') as f:
-            split = json.load(f)
-        train_tickers = split['train']
-        test_tickers = split['test']
-    else:
-        logger.info("Creating new ticker split")
-        all_tickers = df['ticker'].unique().tolist()
-        train_tickers, test_tickers = train_test_split(all_tickers, train_size=train_test_ratio)
-
-        split = {
-            'train': train_tickers,
-            'test': test_tickers
-        }
-        with open(file_path, 'w') as f:
-            json.dump(split, f)
-        logger.info(f"Saved ticker split to {file_path}")
-
-    return train_tickers, test_tickers
-
 
 def generate_sample_data(num_samples=1000, input_width=30, input_features=43, output_features=3, label_width=5):
     # Generate random input data
@@ -218,29 +208,28 @@ def main(model_type, train=True, use_sample_data=False):
         train_data, val_data, test_data, input_features, output_features = generate_sample_data(
             input_width=input_width, label_width=label_width)
     else:
-        # Your existing data preparation code
-        train_test_ratio = 0.8
         logger.info("Preparing data...")
         df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
             'data/processed/sp500.csv',
             'data/processed/market.csv'
         )
-        logger.info("Getting train/test ticker split...")
-        train_tickers, test_tickers = get_or_create_ticker_split(df, train_test_ratio)
-        # Create WindowGenerator for all data
+        logger.info("Getting train/val/test ticker split...")
+        train_tickers, val_tickers, test_tickers = get_ticker_split('data/ticker_split.json')
+
+        # Create WindowGenerator for train and validation data
         window_generator = WindowGenerator(
             input_width=input_width,
             label_width=label_width,
             shift=shift,
             train_df=df[df['ticker'].isin(train_tickers)],
-            val_df=df[df['ticker'].isin(test_tickers)],
-            test_df=df[df['ticker'].isin(test_tickers)],
+            val_df=df[df['ticker'].isin(val_tickers)],
+            test_df=None,  # We don't use test data here
             label_columns=output_features
         )
+
         # Get the datasets
         train_data = window_generator.train
         val_data = window_generator.val
-        test_data = window_generator.test
         output_features = len(output_features)
 
     input_shape = (input_width, input_features)
@@ -254,18 +243,26 @@ def main(model_type, train=True, use_sample_data=False):
                                          learning_rate=0.001)
 
     if train or use_sample_data:
-        train_model(model, train_data, val_data, epochs=100)
+        history, training_time = train_model(model, train_data, val_data, epochs=100)
         if not use_sample_data:
             logger.info("Saving model...")
-            model.save(f'results/{model_type}_model.keras')
+            model.save(f'results/models/{model_type}_model.keras')
+
+            # Save training history and time
+            history_dict = history.history
+            history_dict['training_time'] = training_time
+            with open(f'results/models/{model_type}_history.json', 'w') as f:
+                json.dump(history_dict, f)
+
+            logger.info(f"Training time: {training_time:.2f} seconds")
     else:
         logger.info("Loading pre-trained model...")
-        model = keras.models.load_model(f'results/{model_type}_model.keras')
+        model = keras.models.load_model(f'results/models/{model_type}_model.keras')
 
     logger.info("Evaluating model...")
     metrics = evaluate_model(model, test_data)
     if not use_sample_data:
-        save_metrics(metrics, f'results/{model_type}_metrics.txt')
+        save_metrics(metrics, f'results/metrics/{model_type}_metrics.txt')
 
     for key, value in metrics.items():
         logger.info(f"{key}: {value}")
@@ -274,7 +271,9 @@ def main(model_type, train=True, use_sample_data=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train or test a model.")
-    parser.add_argument("model_type", choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier'],
+    parser.add_argument("model_type",
+                        choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier', 'kan-legendre',
+                                 'kan-wavelet'],
                         help="Type of model to use")
     parser.add_argument("--test", action="store_true", help="Test the model instead of training")
     parser.add_argument("--sample", action="store_true", help="Use sample data for quick testing")

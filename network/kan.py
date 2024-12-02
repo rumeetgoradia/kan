@@ -23,53 +23,6 @@ class BaseKANLayer(tf.keras.layers.Layer):
         return 0.0
 
 
-class ChebyshevKANLayer(BaseKANLayer):
-    def __init__(self, out_features, degree=5, scale_base=1.0, scale_cheb=1.0):
-        super(ChebyshevKANLayer, self).__init__()
-        self.base_weight = None
-        self.cheb_weight = None
-        self.out_features = out_features
-        self.degree = degree
-        self.scale_base = scale_base
-        self.scale_cheb = scale_cheb
-
-    def build(self, input_shape):
-        in_features = input_shape[-1]
-        self.base_weight = self.add_weight(
-            "base_weight",
-            shape=(in_features, self.out_features),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
-            trainable=True
-        )
-        self.cheb_weight = self.add_weight(
-            "cheb_weight",
-            shape=(in_features, self.out_features, self.degree),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_cheb),
-            trainable=True
-        )
-
-    def chebyshev_basis(self, x):
-        x_scaled = 2.0 * (x - tf.reduce_min(x)) / (tf.reduce_max(x) - tf.reduce_min(x)) - 1.0
-        T = [tf.ones_like(x_scaled), x_scaled]
-        for _ in range(2, self.degree):
-            T.append(2 * x_scaled * T[-1] - T[-2])
-        return tf.stack(T, axis=-1)
-
-    def call(self, x):
-        base_output = tf.keras.activations.swish(x) @ self.base_weight
-        cheb_basis = self.chebyshev_basis(x)
-        cheb_output = tf.reduce_sum(cheb_basis[..., tf.newaxis, :] * self.cheb_weight, axis=-1)
-        return base_output + cheb_output
-
-    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
-        l1_fake = tf.reduce_mean(tf.abs(self.cheb_weight), axis=-1)
-        regularization_loss_activation = tf.reduce_sum(l1_fake)
-        p = l1_fake / regularization_loss_activation
-        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
-        return (regularize_activation * regularization_loss_activation
-                + regularize_entropy * regularization_loss_entropy)
-
-
 class BSplineKANLayer(BaseKANLayer):
     def __init__(
             self,
@@ -231,6 +184,65 @@ class BSplineKANLayer(BaseKANLayer):
         )
 
 
+class ChebyshevKANLayer(BaseKANLayer):
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_cheb=1.0):
+        super(ChebyshevKANLayer, self).__init__()
+        self.in_features = None
+        self.base_weight = None
+        self.cheb_weight = None
+        self.out_features = out_features
+        self.degree = degree
+        self.scale_base = scale_base
+        self.scale_cheb = scale_cheb
+
+    def build(self, input_shape):
+        self.in_features = input_shape[-1]
+        self.base_weight = self.add_weight(
+            name="base_weight",
+            shape=(self.in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            dtype=tf.float64,
+            trainable=True
+        )
+        self.cheb_weight = self.add_weight(
+            name="cheb_weight",
+            shape=(self.in_features, self.out_features, self.degree),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_cheb),
+            dtype=tf.float64,
+            trainable=True
+        )
+
+    def chebyshev_basis(self, x):
+        x_scaled = 2.0 * (x - tf.reduce_min(x, axis=-1, keepdims=True)) / (
+                tf.reduce_max(x, axis=-1, keepdims=True) - tf.reduce_min(x, axis=-1, keepdims=True)) - 1.0
+        T = [tf.ones_like(x, dtype=tf.float64), x_scaled]
+        for _ in range(2, self.degree):
+            T.append(2 * x_scaled * T[-1] - T[-2])
+        return tf.stack(T, axis=-1)
+
+    @tf.function
+    def call(self, x):
+        x = tf.cast(x, tf.float64)
+        original_shape = tf.shape(x)
+        x = tf.reshape(x, [-1, self.in_features])
+
+        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        cheb_basis = self.chebyshev_basis(x)
+        cheb_output = tf.einsum('bi,iod,bid->bo', x, self.cheb_weight, cheb_basis)
+        output = base_output + cheb_output
+
+        output = tf.reshape(output, tf.concat([original_shape[:-1], [self.out_features]], axis=0))
+        return output
+
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        l1_fake = tf.reduce_mean(tf.abs(self.cheb_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy)
+
+
 class FourierKANLayer(BaseKANLayer):
     def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0):
         super(FourierKANLayer, self).__init__()
@@ -240,42 +252,255 @@ class FourierKANLayer(BaseKANLayer):
         self.num_frequencies = num_frequencies
         self.scale_base = scale_base
         self.scale_fourier = scale_fourier
+        self.in_features = None  # Add this line to store input features
 
     def build(self, input_shape):
-        in_features = input_shape[-1]
+        self.in_features = input_shape[-1]  # Store the number of input features
         self.base_weight = self.add_weight(
-            "base_weight",
-            shape=(in_features, self.out_features),
+            name="base_weight",
+            shape=(self.in_features, self.out_features),
             initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            dtype=tf.float64,  # Ensure consistent dtype
             trainable=True
         )
         self.fourier_weight = self.add_weight(
-            "fourier_weight",
-            shape=(in_features, self.out_features, 2 * self.num_frequencies),
+            name="fourier_weight",
+            shape=(self.in_features, self.out_features, 2 * self.num_frequencies),
             initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_fourier),
+            dtype=tf.float64,  # Ensure consistent dtype
             trainable=True
         )
 
     def fourier_basis(self, x):
         # Normalize x to the range [0, 2π]
-        x_scaled = 2 * np.pi * (x - tf.reduce_min(x)) / (tf.reduce_max(x) - tf.reduce_min(x))
+        x_scaled = 2 * np.pi * (x - tf.reduce_min(x, axis=-1, keepdims=True)) / (
+                tf.reduce_max(x, axis=-1, keepdims=True) - tf.reduce_min(x, axis=-1, keepdims=True))
 
         # Compute sine and cosine terms
-        frequencies = tf.range(1, self.num_frequencies + 1, dtype=tf.float32)
+        frequencies = tf.range(1, self.num_frequencies + 1, dtype=tf.float64)
         sin_terms = tf.sin(frequencies * x_scaled[..., tf.newaxis])
         cos_terms = tf.cos(frequencies * x_scaled[..., tf.newaxis])
 
         # Concatenate sine and cosine terms
         return tf.concat([sin_terms, cos_terms], axis=-1)
 
+    @tf.function
     def call(self, x):
+        x = tf.cast(x, tf.float64)
         base_output = tf.keras.activations.swish(x) @ self.base_weight
         fourier_basis = self.fourier_basis(x)
-        fourier_output = tf.reduce_sum(fourier_basis[..., tf.newaxis, :] * self.fourier_weight, axis=-1)
+        fourier_output = tf.einsum('bi,iod,bid->bo', x, self.fourier_weight, fourier_basis)
         return base_output + fourier_output
 
     def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
         l1_fake = tf.reduce_mean(tf.abs(self.fourier_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy)
+
+
+class WaveletKANLayer(tf.keras.layers.Layer):
+    """
+    Wavelet Kolmogorov-Arnold Network Layer
+    This layer implements a Kolmogorov-Arnold Network using Haar wavelet basis functions.
+    It combines a base linear transformation with a wavelet transformation to capture
+    both global and local features in the input data.
+    Attributes:
+        out_features (int): Number of output features.
+        num_levels (int): Number of wavelet decomposition levels.
+        scale_base (float): Scaling factor for base weight initialization.
+        scale_wavelet (float): Scaling factor for wavelet weight initialization.
+        base_weight (tf.Variable): Weights for the base linear transformation.
+        wavelet_weight (tf.Variable): Weights for the wavelet transformation.
+    """
+
+    def __init__(self, out_features, num_levels=3, scale_base=1.0, scale_wavelet=1.0):
+        """
+        Initialize the WaveletKANLayer.
+        Args:
+            out_features (int): Number of output features.
+            num_levels (int): Number of wavelet decomposition levels.
+            scale_base (float): Scaling factor for base weight initialization.
+            scale_wavelet (float): Scaling factor for wavelet weight initialization.
+        """
+        super(WaveletKANLayer, self).__init__()
+        self.out_features = out_features
+        self.num_levels = num_levels
+        self.scale_base = scale_base
+        self.scale_wavelet = scale_wavelet
+        self.base_weight = None
+        self.wavelet_weight = None
+
+    def build(self, input_shape):
+        """
+        Build the layer weights.
+        Args:
+            input_shape (tf.TensorShape): Shape of the input tensor.
+        """
+        self.in_features = input_shape[-1]
+        self.base_weight = self.add_weight(
+            name="base_weight",
+            shape=(self.in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            dtype=tf.float64,
+            trainable=True
+        )
+        self.wavelet_weight = self.add_weight(
+            name="wavelet_weight",
+            shape=(self.in_features, self.out_features, self.num_levels),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_wavelet),
+            dtype=tf.float64,
+            trainable=True
+        )
+
+    def haar_wavelet_transform(self, x):
+        """
+        Perform Haar wavelet transform on the input.
+        Args:
+            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            tf.Tensor: Wavelet coefficients of shape (batch_size, in_features, num_levels).
+        """
+        coeffs = []
+        for level in range(self.num_levels):
+            # Compute approximation and detail coefficients
+            approx = (x[:, ::2] + x[:, 1::2]) / np.sqrt(2)
+            detail = (x[:, ::2] - x[:, 1::2]) / np.sqrt(2)
+            coeffs.append(detail)
+            x = approx
+        coeffs.append(x)  # Add the final approximation
+        return tf.stack(coeffs[::-1], axis=-1)  # Stack in reverse order
+
+    @tf.function
+    def call(self, x):
+        """
+        Forward pass of the layer.
+        Args:
+            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            tf.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        x = tf.cast(x, tf.float64)
+        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        wavelet_coeffs = self.haar_wavelet_transform(x)
+        wavelet_output = tf.einsum('bi,iod,bid->bo', x, self.wavelet_weight, wavelet_coeffs)
+        return base_output + wavelet_output
+
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        """
+        Compute regularization loss for the layer.
+        Args:
+            regularize_activation (float): Weight for activation regularization.
+            regularize_entropy (float): Weight for entropy regularization.
+        Returns:
+            tf.Tensor: Regularization loss.
+        """
+        l1_fake = tf.reduce_mean(tf.abs(self.wavelet_weight), axis=-1)
+        regularization_loss_activation = tf.reduce_sum(l1_fake)
+        p = l1_fake / regularization_loss_activation
+        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
+        return (regularize_activation * regularization_loss_activation
+                + regularize_entropy * regularization_loss_entropy)
+
+
+class LegendreKANLayer(tf.keras.layers.Layer):
+    """
+    Legendre Kolmogorov-Arnold Network Layer
+    This layer implements a Kolmogorov-Arnold Network using Legendre polynomial basis functions.
+    It combines a base linear transformation with a Legendre polynomial transformation to capture
+    both global and local features in the input data.
+    Attributes:
+        out_features (int): Number of output features.
+        degree (int): Degree of Legendre polynomials to use.
+        scale_base (float): Scaling factor for base weight initialization.
+        scale_legendre (float): Scaling factor for Legendre weight initialization.
+        base_weight (tf.Variable): Weights for the base linear transformation.
+        legendre_weight (tf.Variable): Weights for the Legendre polynomial transformation.
+    """
+
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0):
+        """
+        Initialize the LegendreKANLayer.
+        Args:
+            out_features (int): Number of output features.
+            degree (int): Degree of Legendre polynomials to use.
+            scale_base (float): Scaling factor for base weight initialization.
+            scale_legendre (float): Scaling factor for Legendre weight initialization.
+        """
+        super(LegendreKANLayer, self).__init__()
+        self.out_features = out_features
+        self.degree = degree
+        self.scale_base = scale_base
+        self.scale_legendre = scale_legendre
+        self.base_weight = None
+        self.legendre_weight = None
+
+    def build(self, input_shape):
+        """
+        Build the layer weights.
+        Args:
+            input_shape (tf.TensorShape): Shape of the input tensor.
+        """
+        self.in_features = input_shape[-1]
+        self.base_weight = self.add_weight(
+            name="base_weight",
+            shape=(self.in_features, self.out_features),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
+            dtype=tf.float64,
+            trainable=True
+        )
+        self.legendre_weight = self.add_weight(
+            name="legendre_weight",
+            shape=(self.in_features, self.out_features, self.degree + 1),
+            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_legendre),
+            dtype=tf.float64,
+            trainable=True
+        )
+
+    def legendre_basis(self, x):
+        """
+        Compute Legendre polynomial basis functions.
+        Args:
+            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            tf.Tensor: Legendre polynomial values of shape (batch_size, in_features, degree + 1).
+        """
+        # Normalize x to the range [-1, 1]
+        x_norm = 2.0 * (x - tf.reduce_min(x, axis=-1, keepdims=True)) / (
+                    tf.reduce_max(x, axis=-1, keepdims=True) - tf.reduce_min(x, axis=-1, keepdims=True)) - 1.0
+        legendre_polys = [tf.ones_like(x_norm), x_norm]
+        for n in range(2, self.degree + 1):
+            p_n = ((2 * n - 1) * x_norm * legendre_polys[-1] - (n - 1) * legendre_polys[-2]) / n
+            legendre_polys.append(p_n)
+        return tf.stack(legendre_polys, axis=-1)
+
+    @tf.function
+    def call(self, x):
+        """
+        Forward pass of the layer.
+        Args:
+            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
+        Returns:
+            tf.Tensor: Output tensor of shape (batch_size, out_features).
+        """
+        x = tf.cast(x, tf.float64)
+        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        legendre_basis = self.legendre_basis(x)
+        legendre_output = tf.einsum('bi,iod,bid->bo', x, self.legendre_weight, legendre_basis)
+        return base_output + legendre_output
+
+    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
+        """
+        Compute regularization loss for the layer.
+        Args:
+            regularize_activation (float): Weight for activation regularization.
+            regularize_entropy (float): Weight for entropy regularization.
+        Returns:
+            tf.Tensor: Regularization loss.
+        """
+        l1_fake = tf.reduce_mean(tf.abs(self.legendre_weight), axis=-1)
         regularization_loss_activation = tf.reduce_sum(l1_fake)
         p = l1_fake / regularization_loss_activation
         regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))

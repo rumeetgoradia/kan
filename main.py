@@ -22,6 +22,17 @@ from network.ts_kan import TimeSeriesKAN
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Check for GPU availability
+physical_devices = tf.config.list_physical_devices('GPU')
+if len(physical_devices) > 0:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    print("GPU is available. Using GPU.")
+else:
+    print("No GPU available. Using CPU.")
+
+# Set the device
+device = "/gpu:0" if len(physical_devices) > 0 else "/cpu:0"
+
 
 def create_lstm_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
     inputs = keras.Input(shape=input_shape, dtype=tf.float64)
@@ -234,27 +245,28 @@ def main(model_type, train=True, use_sample_data=False):
 
     input_shape = (input_width, input_features)
     logger.info(f"Creating {model_type} model...")
-    if model_type.startswith('kan-'):
-        kan_type = model_type.split('-')[1]
-        model = create_and_compile_model(kan_type, input_shape, output_features, label_width, learning_rate=0.001,
-                                         hidden_size=64, kan_size=32)
-    else:
-        model = create_and_compile_model(model_type, input_shape, output_features, label_width,
-                                         learning_rate=0.001)
+    with tf.device(device):
+        if model_type.startswith('kan-'):
+            kan_type = model_type.split('-')[1]
+            model = create_and_compile_model(kan_type, input_shape, output_features, label_width, learning_rate=0.001,
+                                             hidden_size=64, kan_size=32)
+        else:
+            model = create_and_compile_model(model_type, input_shape, output_features, label_width,
+                                             learning_rate=0.001)
 
 
-    history, training_time = train_model(model, train_data, val_data, epochs=100)
-    if not use_sample_data:
-        logger.info("Saving model...")
-        model.save(f'results/models/{model_type}_model.keras')
+        history, training_time = train_model(model, train_data, val_data, epochs=100)
+        if not use_sample_data:
+            logger.info("Saving model...")
+            model.save(f'results/models/{model_type}_model.keras')
 
-        # Save training history and time
-        history_dict = history.history
-        history_dict['training_time'] = training_time
-        with open(f'results/models/{model_type}_history.json', 'w') as f:
-            json.dump(history_dict, f)
+            # Save training history and time
+            history_dict = history.history
+            history_dict['training_time'] = training_time
+            with open(f'results/models/{model_type}_history.json', 'w') as f:
+                json.dump(history_dict, f)
 
-        logger.info(f"Training time: {training_time:.2f} seconds")
+            logger.info(f"Training time: {training_time:.2f} seconds")
 
     logger.info("Process completed successfully.")
 

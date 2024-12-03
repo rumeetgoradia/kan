@@ -67,7 +67,7 @@ def create_ticker_split(df, train_ratio=0.7, val_ratio=0.15, file_path='ticker_s
     logger.info("Creating new ticker split")
     all_tickers = df['ticker'].unique().tolist()
     train_tickers, temp_tickers = train_test_split(all_tickers, train_size=train_ratio)
-    val_tickers, test_tickers = train_test_split(temp_tickers, train_size=val_ratio / (1 - train_ratio))
+    val_tickers, test_tickers = train_test_split(temp_tickers, train_size=(val_ratio / (1 - train_ratio)))
 
     split = {
         'train': train_tickers,

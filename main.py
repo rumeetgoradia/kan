@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_lstm_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
-    inputs = keras.Input(shape=input_shape)
+    inputs = keras.Input(shape=input_shape, dtype=tf.float64)
     x = inputs
     x = LSTM(units, return_sequences=True)(x)
     x = Dropout(dropout_rate)(x)
@@ -36,7 +36,7 @@ def create_lstm_model(input_shape, output_features, label_width, units=64, dropo
 
 
 def create_mlp_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
-    inputs = keras.Input(shape=input_shape)
+    inputs = keras.Input(shape=input_shape, dtype=tf.float64)
     x = keras.layers.Flatten()(inputs)
     x = Dense(units, activation='relu', kernel_initializer='he_normal')(x)
     x = Dropout(dropout_rate)(x)

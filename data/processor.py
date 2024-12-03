@@ -174,10 +174,9 @@ def prepare_data(stock_file, market_file, train_ratio=0.7, val_ratio=0.15, ticke
 
 
 if __name__ == "__main__":
-    df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data('processed/sp500.csv',
-                                                                                               'processed/market.csv')
-    logger.info(f"Data shape: {df.shape}")
-    logger.info(f"Input features: {input_features}")
-    logger.info(f"Output features: {output_features}")
-    logger.info(f"Number of stocks: {len(stock_scalers)}")
-    logger.info(f"Number of encoders: {len(encoders)}")
+    df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
+        './processed/sp500.csv',
+        './processed/market.csv'
+    )
+
+    create_ticker_split(df, 0.7, 0.15, './ticker_split.json')

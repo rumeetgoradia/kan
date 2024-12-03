@@ -207,7 +207,7 @@ def generate_sample_data(num_samples=1000, input_width=30, input_features=43, ou
     return train_data, val_data, test_data, input_features, output_features
 
 
-def main(model_type, train=True, use_sample_data=False):
+def main(model_type, use_sample_data=False):
     tf.keras.backend.set_floatx('float64')
     # Parameters
     input_width = 30
@@ -242,6 +242,7 @@ def main(model_type, train=True, use_sample_data=False):
         # Get the datasets
         train_data = window_generator.train
         val_data = window_generator.val
+        input_features = len(input_features)
         output_features = len(output_features)
 
     input_shape = (input_width, input_features)
@@ -281,4 +282,4 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true", help="Test the model instead of training")
     parser.add_argument("--sample", action="store_true", help="Use sample data for quick testing")
     args = parser.parse_args()
-    main(args.model_type, not args.test, args.sample)
+    main(args.model_type, args.sample)

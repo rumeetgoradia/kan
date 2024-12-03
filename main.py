@@ -258,17 +258,26 @@ def main(model_type, use_sample_data=False):
 
 
         history, training_time = train_model(model, train_data, val_data, epochs=100)
-        if not use_sample_data:
-            logger.info("Saving model...")
+
+        logger.info("Saving model...")
+
+        if use_sample_data:
+            model.save(f'results/models/{model_type}_sample_model.keras')
+        else:
             model.save(f'results/models/{model_type}_model.keras')
 
-            # Save training history and time
-            history_dict = history.history
-            history_dict['training_time'] = training_time
+        # Save training history and time
+        history_dict = history.history
+        history_dict['training_time'] = training_time
+
+        if use_sample_data:
+            with open(f'results/models/{model_type}_sample_history.json', 'w') as f:
+                json.dump(history_dict, f)
+        else:
             with open(f'results/models/{model_type}_history.json', 'w') as f:
                 json.dump(history_dict, f)
 
-            logger.info(f"Training time: {training_time:.2f} seconds")
+        logger.info(f"Training time: {training_time:.2f} seconds")
 
     logger.info("Process completed successfully.")
 

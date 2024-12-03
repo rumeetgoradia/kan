@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def get_ticker_split(file_path='data/ticker_split.json'):
+def get_ticker_split(file_path):
     """
     Retrieve the ticker split from a JSON file.
 
@@ -140,7 +140,7 @@ def split_data(df, ticker, train_split=0.7, val_split=0.2):
     return train_df, val_df, test_df
 
 
-def prepare_data(stock_file, market_file, train_ratio=0.7, val_ratio=0.15, ticker_split_file='ticker_split.json'):
+def prepare_data(stock_file, market_file, train_ratio=0.7, val_ratio=0.15, ticker_split_file='./ticker_split.json'):
     logger.info("Starting data preparation...")
     df = load_and_merge_data(stock_file, market_file)
 
@@ -178,5 +178,3 @@ if __name__ == "__main__":
         './processed/sp500.csv',
         './processed/market.csv'
     )
-
-    create_ticker_split(df, 0.7, 0.15, './ticker_split.json')

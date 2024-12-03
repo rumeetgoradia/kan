@@ -242,30 +242,20 @@ def main(model_type, train=True, use_sample_data=False):
         model = create_and_compile_model(model_type, input_shape, output_features, label_width,
                                          learning_rate=0.001)
 
-    if train or use_sample_data:
-        history, training_time = train_model(model, train_data, val_data, epochs=100)
-        if not use_sample_data:
-            logger.info("Saving model...")
-            model.save(f'results/models/{model_type}_model.keras')
 
-            # Save training history and time
-            history_dict = history.history
-            history_dict['training_time'] = training_time
-            with open(f'results/models/{model_type}_history.json', 'w') as f:
-                json.dump(history_dict, f)
-
-            logger.info(f"Training time: {training_time:.2f} seconds")
-    else:
-        logger.info("Loading pre-trained model...")
-        model = keras.models.load_model(f'results/models/{model_type}_model.keras')
-
-    logger.info("Evaluating model...")
-    metrics = evaluate_model(model, test_data)
+    history, training_time = train_model(model, train_data, val_data, epochs=100)
     if not use_sample_data:
-        save_metrics(metrics, f'results/metrics/{model_type}_metrics.txt')
+        logger.info("Saving model...")
+        model.save(f'results/models/{model_type}_model.keras')
 
-    for key, value in metrics.items():
-        logger.info(f"{key}: {value}")
+        # Save training history and time
+        history_dict = history.history
+        history_dict['training_time'] = training_time
+        with open(f'results/models/{model_type}_history.json', 'w') as f:
+            json.dump(history_dict, f)
+
+        logger.info(f"Training time: {training_time:.2f} seconds")
+
     logger.info("Process completed successfully.")
 
 

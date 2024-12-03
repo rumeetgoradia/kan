@@ -15,6 +15,7 @@ from data.window_generator import WindowGenerator
 
 # Set up directories
 MODELS_DIR = 'results/models'
+METRICS_DIR = 'results/metrics'
 ANALYSIS_DIR = 'results/analysis'
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
@@ -63,7 +64,7 @@ def load_test_data():
 
 
 def load_training_history(model_name):
-    history_path = os.path.join(MODELS_DIR, f'{model_name}_history.json')
+    history_path = os.path.join(METRICS_DIR, f'{model_name}_history.json')
     if os.path.exists(history_path):
         with open(history_path, 'r') as f:
             return json.load(f)

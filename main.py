@@ -271,10 +271,10 @@ def main(model_type, use_sample_data=False):
         history_dict['training_time'] = training_time
 
         if use_sample_data:
-            with open(f'results/models/{model_type}_sample_history.json', 'w') as f:
+            with open(f'results/metrics/{model_type}_sample_history.json', 'w') as f:
                 json.dump(history_dict, f)
         else:
-            with open(f'results/models/{model_type}_history.json', 'w') as f:
+            with open(f'results/metrics/{model_type}_history.json', 'w') as f:
                 json.dump(history_dict, f)
 
         logger.info(f"Training time: {training_time:.2f} seconds")

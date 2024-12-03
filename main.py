@@ -1,17 +1,13 @@
 import argparse
 import json
 import logging
-import os
+import time
 
 import numpy as np
 import tensorflow as tf
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Dropout, LSTM
 from tensorflow.keras.metrics import R2Score, MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
-from tqdm import tqdm
-import time
 
 from data.processor import prepare_data, get_ticker_split
 from data.window_generator import WindowGenerator
@@ -104,10 +100,6 @@ def create_and_compile_model(model_type, input_shape, output_features, label_wid
     return model
 
 
-def check_for_nan(tensor):
-    return tf.reduce_any(tf.math.is_nan(tensor))
-
-
 def train_model(model, train_data, val_data, epochs):
     early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
@@ -139,49 +131,6 @@ def train_model(model, train_data, val_data, epochs):
     training_time = end_time - start_time
 
     return history, training_time
-
-
-def evaluate_model(model, test_data):
-    y_true = []
-    y_pred = []
-    for x, y in tqdm(test_data, desc="Evaluating"):
-        y_true.append(y.numpy())
-        pred = model.predict(x, verbose=0)
-        if np.isnan(pred).any():
-            logger.warning("NaN values found in model predictions")
-        y_pred.append(pred)
-
-    y_true = np.concatenate(y_true)
-    y_pred = np.concatenate(y_pred)
-
-    # Check for NaN values
-    if np.isnan(y_true).any() or np.isnan(y_pred).any():
-        logger.warning("NaN values found in true values or predictions")
-
-    # Flatten the arrays
-    y_true_flat = y_true.reshape(-1, y_true.shape[-1])
-    y_pred_flat = y_pred.reshape(-1, y_pred.shape[-1])
-
-    # Calculate metrics
-    mse = mean_squared_error(y_true_flat, y_pred_flat)
-    mae = mean_absolute_error(y_true_flat, y_pred_flat)
-    rmse = np.sqrt(mse)
-    r2 = r2_score(y_true_flat, y_pred_flat)
-
-    metrics = {
-        'mse': mse,
-        'mae': mae,
-        'rmse': rmse,
-        'r2': r2
-    }
-    return metrics
-
-
-def save_metrics(metrics, file_path):
-    with open(file_path, 'w') as f:
-        for metric_name, value in metrics.items():
-            f.write(f'{metric_name}: {value}\n')
-
 
 
 def generate_sample_data(num_samples=1000, input_width=30, input_features=43, output_features=3, label_width=5):
@@ -255,7 +204,6 @@ def main(model_type, use_sample_data=False):
         else:
             model = create_and_compile_model(model_type, input_shape, output_features, label_width,
                                              learning_rate=0.001)
-
 
         history, training_time = train_model(model, train_data, val_data, epochs=100)
 

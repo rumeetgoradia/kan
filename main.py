@@ -35,7 +35,7 @@ device = "/gpu:0" if len(physical_devices) > 0 else "/cpu:0"
 
 
 def create_lstm_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
-    inputs = keras.Input(shape=input_shape, dtype=tf.float64)
+    inputs = keras.Input(shape=input_shape, dtype="float64")
     x = inputs
     x = LSTM(units, return_sequences=True)(x)
     x = Dropout(dropout_rate)(x)
@@ -47,7 +47,7 @@ def create_lstm_model(input_shape, output_features, label_width, units=64, dropo
 
 
 def create_mlp_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
-    inputs = keras.Input(shape=input_shape, dtype=tf.float64)
+    inputs = keras.Input(shape=input_shape, dtype="float64")
     x = keras.layers.Flatten()(inputs)
     x = Dense(units, activation='relu', kernel_initializer='he_normal')(x)
     x = Dropout(dropout_rate)(x)
@@ -222,7 +222,8 @@ def main(model_type, train=True, use_sample_data=False):
         logger.info("Preparing data...")
         df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
             'data/processed/sp500.csv',
-            'data/processed/market.csv'
+            'data/processed/market.csv',
+            'data/ticker_split.json'
         )
         logger.info("Getting train/val/test ticker split...")
         train_tickers, val_tickers, test_tickers = get_ticker_split('data/ticker_split.json')

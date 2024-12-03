@@ -140,7 +140,7 @@ def split_data(df, ticker, train_split=0.7, val_split=0.2):
     return train_df, val_df, test_df
 
 
-def prepare_data(stock_file, market_file, train_ratio=0.7, val_ratio=0.15, ticker_split_file='./ticker_split.json'):
+def prepare_data(stock_file, market_file, ticker_split_file, train_ratio=0.7, val_ratio=0.15):
     logger.info("Starting data preparation...")
     df = load_and_merge_data(stock_file, market_file)
 
@@ -176,5 +176,6 @@ def prepare_data(stock_file, market_file, train_ratio=0.7, val_ratio=0.15, ticke
 if __name__ == "__main__":
     df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
         './processed/sp500.csv',
-        './processed/market.csv'
+        './processed/market.csv',
+        ticker_split_file='./ticker_split.csv'
     )

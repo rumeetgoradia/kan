@@ -86,7 +86,7 @@ def create_and_compile_model(model_type, input_shape, output_features, label_wid
         model = create_lstm_model(input_shape, output_features, label_width, **kwargs)
     elif model_type.lower() == 'mlp':
         model = create_mlp_model(input_shape, output_features, label_width, **kwargs)
-    elif model_type.lower() in ['bspline', 'chebyshev', 'fourier']:
+    elif model_type.lower() in ['bspline', 'chebyshev', 'fourier', 'legendre', 'wavelet']:
         model = create_kan_model(input_shape, output_features, label_width, kan_type=model_type, **kwargs)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")

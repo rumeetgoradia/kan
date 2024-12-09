@@ -301,7 +301,7 @@ class FourierKANLayer(BaseKANLayer):
                 + regularize_entropy * regularization_loss_entropy)
 
 
-class WaveletKANLayer(tf.keras.layers.Layer):
+class WaveletKANLayer(BaseKANLayer):
     """
     Wavelet Kolmogorov-Arnold Network Layer
     This layer implements a Kolmogorov-Arnold Network using Haar wavelet basis functions.
@@ -405,7 +405,7 @@ class WaveletKANLayer(tf.keras.layers.Layer):
                 + regularize_entropy * regularization_loss_entropy)
 
 
-class LegendreKANLayer(tf.keras.layers.Layer):
+class LegendreKANLayer(BaseKANLayer):
     """
     Legendre Kolmogorov-Arnold Network Layer
     This layer implements a Kolmogorov-Arnold Network using Legendre polynomial basis functions.

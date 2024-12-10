@@ -12,12 +12,47 @@ from tensorflow.keras.models import load_model
 
 from data.processor import get_ticker_split, prepare_data
 from data.window_generator import WindowGenerator
+from network import ThreeDimensionalR2Score
+from network.kan import TimeSeriesKAN, TimeSeriesKANAttentionLayer
+from network.kan.layer import *
 
 # Set up directories
 MODELS_DIR = 'results/models'
 METRICS_DIR = 'results/metrics'
 ANALYSIS_DIR = 'results/analysis'
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
+
+
+def custom_load_model(model_path):
+    custom_objects = {
+        'BaseKANLayer': BaseKANLayer,
+        'BSplineKANLayer': BSplineKANLayer,
+        'ChebyshevKANLayer': ChebyshevKANLayer,
+        'FourierKANLayer': FourierKANLayer,
+        'LegendreKANLayer': LegendreKANLayer,
+        'TimeSeriesKAN': TimeSeriesKAN,
+        'AttentionLayer': TimeSeriesKANAttentionLayer,
+        'CustomR2Score': ThreeDimensionalR2Score
+    }
+
+    # Load the model with custom objects
+    model = load_model(model_path, custom_objects=custom_objects, compile=False)
+
+    # Patch the model if it's a TimeSeriesKAN
+    if isinstance(model, TimeSeriesKAN):
+        # Find the KAN layer
+        kan_layer = None
+        for layer in model.layers:
+            if isinstance(layer, BaseKANLayer):
+                kan_layer = layer
+                break
+
+        if kan_layer is not None:
+            # Manually set the kan_layer attribute
+            model.kan_layer = kan_layer
+
+    return model
+
 
 # Load models
 models = {}
@@ -26,7 +61,16 @@ for file in os.listdir(MODELS_DIR):
         model_name = file.split('_')[0]
         model_path = os.path.join(MODELS_DIR, file)
         try:
-            models[model_name] = load_model(model_path)
+            models[model_name] = load_model(model_path, custom_objects={
+                'BaseKANLayer': BaseKANLayer,
+                'BSplineKANLayer': BSplineKANLayer,
+                'ChebyshevKANLayer': ChebyshevKANLayer,
+                'FourierKANLayer': FourierKANLayer,
+                'LegendreKANLayer': LegendreKANLayer,
+                'TimeSeriesKAN': TimeSeriesKAN,
+                'AttentionLayer': TimeSeriesKANAttentionLayer,
+                'CustomR2Score': ThreeDimensionalR2Score
+            })
             print(f"Loaded model: {model_name}")
         except Exception as e:
             print(f"Error loading model {model_name}: {e}")

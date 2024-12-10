@@ -140,7 +140,7 @@ def split_data(df, ticker, train_split=0.7, val_split=0.2):
     return train_df, val_df, test_df
 
 
-def prepare_data(stock_file, market_file, ticker_split_file, train_ratio=0.7, val_ratio=0.15):
+def prepare_data(stock_file, market_file, ticker_split_file=None, train_ratio=0.7, val_ratio=0.15):
     logger.info("Starting data preparation...")
     df = load_and_merge_data(stock_file, market_file)
 
@@ -167,7 +167,7 @@ def prepare_data(stock_file, market_file, ticker_split_file, train_ratio=0.7, va
     logger.info(f"Number of columns in DataFrame: {len(df.columns)}")
     logger.info(f"Columns in DataFrame: {df.columns.tolist()}")
 
-    if not os.path.exists(ticker_split_file):
+    if ticker_split_file is not None and not os.path.exists(ticker_split_file):
         create_ticker_split(df, train_ratio, val_ratio, ticker_split_file)
 
     return df, input_features, output_features, stock_scalers, market_scaler, encoders

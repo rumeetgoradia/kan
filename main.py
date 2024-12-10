@@ -7,12 +7,13 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Dropout, LSTM
-from tensorflow.keras.metrics import R2Score, MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
+from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
 
 from data.processor import prepare_data, get_ticker_split
 from data.window_generator import WindowGenerator
-from network.kan import ChebyshevKANLayer, BSplineKANLayer, FourierKANLayer, LegendreKANLayer, WaveletKANLayer
-from network.ts_kan import TimeSeriesKAN
+from network import ThreeDimensionalR2Score
+from network.kan import TimeSeriesKAN
+from network.kan.layer import *
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,13 +75,6 @@ def create_kan_model(input_shape, output_features, label_width, kan_type, hidden
     return model
 
 
-class CustomR2Score(R2Score):
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        y_true = tf.reshape(y_true, [-1, y_true.shape[-1]])
-        y_pred = tf.reshape(y_pred, [-1, y_pred.shape[-1]])
-        return super().update_state(y_true, y_pred, sample_weight)
-
-
 def create_and_compile_model(model_type, input_shape, output_features, label_width, learning_rate=0.001, **kwargs):
     if model_type.lower() == 'lstm':
         model = create_lstm_model(input_shape, output_features, label_width, **kwargs)
@@ -96,7 +90,7 @@ def create_and_compile_model(model_type, input_shape, output_features, label_wid
                   metrics=[MeanAbsoluteError(name='mae'),
                            MeanSquaredError(name='mse'),
                            RootMeanSquaredError(name='rmse'),
-                           CustomR2Score(name='r2')])
+                           ThreeDimensionalR2Score(name='r2')])
     return model
 
 
@@ -231,12 +225,10 @@ def main(model_type, use_sample_data=False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train or test a model.")
+    parser = argparse.ArgumentParser(description="Train a model.")
     parser.add_argument("model_type",
-                        choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier', 'kan-legendre',
-                                 'kan-wavelet'],
+                        choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier', 'kan-legendre'],
                         help="Type of model to use")
-    parser.add_argument("--test", action="store_true", help="Test the model instead of training")
     parser.add_argument("--sample", action="store_true", help="Use sample data for quick testing")
     args = parser.parse_args()
     main(args.model_type, args.sample)

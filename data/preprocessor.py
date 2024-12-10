@@ -8,10 +8,10 @@ import yfinance as yf
 
 
 def preprocess_market_data(commodities_csv_file_path: str, indices_csv_file_path: str, output_file_path: str):
-    # Load the first CSV
+    # Load the commodities CSV
     commodities_csv = pd.read_csv(commodities_csv_file_path)
 
-    # Load the second CSV
+    # Load the indices CSV
     indices_csv = pd.read_csv(indices_csv_file_path)
 
     # Select the required columns from the second CSV

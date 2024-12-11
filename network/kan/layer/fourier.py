@@ -5,8 +5,11 @@ from network.kan.layer import BaseKANLayer
 
 
 class FourierKANLayer(BaseKANLayer):
-    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0):
+    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0,
+                 fourier_weight=None, base_weight=None, **kwargs):
         super(FourierKANLayer, self).__init__()
+        self.fourier_weight = fourier_weight
+        self.base_weight = base_weight
         self.out_features = out_features
         self.num_frequencies = num_frequencies
         self.scale_base = scale_base
@@ -65,7 +68,9 @@ class FourierKANLayer(BaseKANLayer):
             'out_features': self.out_features,
             'num_frequencies': self.num_frequencies,
             'scale_base': self.scale_base,
-            'scale_fourier': self.scale_fourier
+            'scale_fourier': self.scale_fourier,
+            'fourier_weight': self.fourier_weight,
+            'base_weight': self.base_weight
         })
         return config
 

@@ -23,6 +23,12 @@ ANALYSIS_DIR = 'results/analysis'
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
 
+# Parameters
+input_width = 30
+label_width = 5
+output_features = 3
+shift = 5
+
 def custom_load_model(model_path):
     custom_objects = {
         'BaseKANLayer': BaseKANLayer,
@@ -37,6 +43,8 @@ def custom_load_model(model_path):
 
     # Load the model with custom objects
     model = load_model(model_path, custom_objects=custom_objects, compile=False)
+    if 'kan-' in model_path:
+        model.reshape = tf.keras.layers.Reshape((label_width, output_features))
 
     # Patch the model if it's a TimeSeriesKAN
     if isinstance(model, TimeSeriesKAN):
@@ -79,10 +87,6 @@ print(f"Loaded models: {list(models.keys())}")
 
 def load_test_data():
     try:
-        # Parameters
-        input_width = 30
-        label_width = 5
-        shift = 5
         # Prepare data
         df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
             'data/processed/sp500.csv',
@@ -126,11 +130,28 @@ def get_model_stats(model, X_test):
 
 
 def calculate_metrics(y_true, y_pred):
-    mse = mean_squared_error(y_true, y_pred)
-    mae = mean_absolute_error(y_true, y_pred)
+    # Reshape the arrays to 2D: (num_samples * look_ahead, num_features)
+    y_true_reshaped = y_true.reshape(-1, y_true.shape[-1])
+    y_pred_reshaped = y_pred.reshape(-1, y_pred.shape[-1])
+
+    # Calculate metrics
+    mse = mean_squared_error(y_true_reshaped, y_pred_reshaped)
+    mae = mean_absolute_error(y_true_reshaped, y_pred_reshaped)
     rmse = np.sqrt(mse)
-    r2 = r2_score(y_true, y_pred)
-    return {'MSE': mse, 'MAE': mae, 'RMSE': rmse, 'R2': r2}
+
+    # Calculate R2 score for each feature
+    r2_scores = [r2_score(y_true_reshaped[:, i], y_pred_reshaped[:, i]) for i in range(y_true.shape[-1])]
+
+    # Average R2 score across features
+    r2_avg = np.mean(r2_scores)
+
+    return {
+        'MSE': mse,
+        'MAE': mae,
+        'RMSE': rmse,
+        'R2': r2_avg,
+        'R2_per_feature': r2_scores
+    }
 
 
 # Load test data
@@ -172,12 +193,31 @@ def get_hyperparameters(model):
             hyperparams['LSTM Units'] = layer.units
         elif isinstance(layer, tf.keras.layers.Dense):
             hyperparams['Dense Units'] = layer.units
-    hyperparams['Learning Rate'] = model.optimizer.lr.numpy()
+
+    # Handle different ways to access learning rate
+    if hasattr(model.optimizer, 'lr'):
+        lr = model.optimizer.lr
+    elif hasattr(model.optimizer, 'learning_rate'):
+        lr = model.optimizer.learning_rate
+    else:
+        lr = None
+
+    if lr is not None:
+        if callable(lr):
+            hyperparams['Learning Rate'] = lr().numpy()
+        else:
+            hyperparams['Learning Rate'] = lr.numpy()
+    else:
+        hyperparams['Learning Rate'] = 'Unknown'
+
     return hyperparams
 
 
 hyperparameter_data = []
 for name, model in models.items():
+    if not hasattr(model, 'optimizer') or model.optimizer is None:
+        print(f"Warning: Model {name} is not compiled. Skipping hyperparameter extraction.")
+        continue
     hyperparams = get_hyperparameters(model)
     hyperparams['Model'] = name
     hyperparameter_data.append(hyperparams)
@@ -191,6 +231,7 @@ metrics_data = []
 for name, model in models.items():
     y_pred = model.predict(X_test)
     metrics = calculate_metrics(y_test, y_pred)
+    print("Calculated metrics for", name)
     metrics['Model'] = name
     metrics_data.append(metrics)
 metrics_df = pd.DataFrame(metrics_data)
@@ -199,15 +240,15 @@ print(metrics_df)
 metrics_df.to_csv(os.path.join(ANALYSIS_DIR, 'model_metrics.csv'), index=False)
 
 # Figures
-# Predicted vs. Actual Values (for the first output feature)
+# Predicted vs. Actual Values (for the first output feature and first time step)
 plt.figure(figsize=(12, 6))
-plt.plot(y_test[:100, 0], label='Actual', alpha=0.7)
+plt.plot(y_test[:100, 0, 0], label='Actual', alpha=0.7)
 for name, model in models.items():
     y_pred = model.predict(X_test)
-    plt.plot(y_pred[:100, 0], label=f'{name} Predicted', alpha=0.7)
+    plt.plot(y_pred[:100, 0, 0], label=f'{name} Predicted', alpha=0.7)
 plt.legend()
-plt.title('Predicted vs Actual Values (First 100 samples, first feature)')
-plt.xlabel('Time')
+plt.title('Predicted vs Actual Values (First 100 samples, first feature, first time step)')
+plt.xlabel('Sample')
 plt.ylabel('Value')
 plt.savefig(os.path.join(ANALYSIS_DIR, 'predicted_vs_actual.png'))
 plt.close()
@@ -231,7 +272,8 @@ plt.figure(figsize=(10, 6))
 for name, model in models.items():
     inference_time, _ = get_model_stats(model, X_test)
     y_pred = model.predict(X_test)
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    rmse = np.sqrt(mean_squared_error(y_test.reshape(-1, y_test.shape[-1]),
+                                      y_pred.reshape(-1, y_pred.shape[-1])))
     plt.scatter(inference_time, rmse, label=name)
 plt.xlabel('Inference Time (s)')
 plt.ylabel('RMSE')
@@ -245,12 +287,41 @@ error_data = []
 for name, model in models.items():
     y_pred = model.predict(X_test)
     errors = y_test - y_pred
-    error_data.append(pd.DataFrame({'Model': name, 'Error': errors.flatten()}))
-error_df = pd.concat(error_data)
+    error_df = pd.DataFrame({
+        'Model': [name] * errors.size,
+        'Error': errors.flatten(),
+        'Feature': np.tile(np.repeat(range(errors.shape[2]), errors.shape[1]), errors.shape[0]),
+        'Time Step': np.tile(np.repeat(range(errors.shape[1]), errors.shape[2]), errors.shape[0])
+    })
+    error_data.append(error_df)
+error_df = pd.concat(error_data, ignore_index=True)
+
 plt.figure(figsize=(12, 6))
 sns.violinplot(x='Model', y='Error', data=error_df)
-plt.title('Distribution of Prediction Errors')
-plt.savefig(os.path.join(ANALYSIS_DIR, 'error_distribution.png'))
+plt.title('Distribution of Prediction Errors (All Features and Time Steps)')
+plt.savefig(os.path.join(ANALYSIS_DIR, 'error_distribution_all.png'))
+plt.close()
+
+# Distribution of Prediction Errors by Feature
+plt.figure(figsize=(15, 5 * ((len(models) - 1) // 3 + 1)))
+for i, feature in enumerate(range(y_test.shape[2])):
+    plt.subplot(((len(models) - 1) // 3 + 1), 3, i + 1)
+    sns.violinplot(x='Model', y='Error', data=error_df[error_df['Feature'] == feature])
+    plt.title(f'Distribution of Prediction Errors (Feature {feature})')
+    plt.xticks(rotation=45)
+plt.tight_layout()
+plt.savefig(os.path.join(ANALYSIS_DIR, 'error_distribution_by_feature.png'))
+plt.close()
+
+# Distribution of Prediction Errors by Time Step
+plt.figure(figsize=(15, 5 * ((len(models) - 1) // 3 + 1)))
+for i, time_step in enumerate(range(y_test.shape[1])):
+    plt.subplot(((len(models) - 1) // 3 + 1), 3, i + 1)
+    sns.violinplot(x='Model', y='Error', data=error_df[error_df['Time Step'] == time_step])
+    plt.title(f'Distribution of Prediction Errors (Time Step {time_step})')
+    plt.xticks(rotation=45)
+plt.tight_layout()
+plt.savefig(os.path.join(ANALYSIS_DIR, 'error_distribution_by_time_step.png'))
 plt.close()
 
 print(f"\nAnalysis complete. Results saved in {ANALYSIS_DIR}")

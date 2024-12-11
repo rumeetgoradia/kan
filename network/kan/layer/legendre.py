@@ -4,8 +4,11 @@ from network.kan.layer import BaseKANLayer
 
 
 class LegendreKANLayer(BaseKANLayer):
-    def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0):
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0,
+                 legendre_weight=None, base_weight=None, **kwargs):
         super(LegendreKANLayer, self).__init__()
+        self.legendre_weight = legendre_weight
+        self.base_weight = base_weight
         self.out_features = out_features
         self.degree = degree
         self.scale_base = scale_base
@@ -84,7 +87,9 @@ class LegendreKANLayer(BaseKANLayer):
             'out_features': self.out_features,
             'degree': self.degree,
             'scale_base': self.scale_base,
-            'scale_legendre': self.scale_legendre
+            'scale_legendre': self.scale_legendre,
+            'legendre_weight': self.legendre_weight,
+            'base_weight': self.base_weight
         })
         return config
 

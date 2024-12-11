@@ -4,7 +4,7 @@ from network.kan.layer import BaseKANLayer
 
 
 class TimeSeriesKANAttentionLayer(tf.keras.layers.Layer):
-    def __init__(self, units):
+    def __init__(self, units, **kwargs):
         super(TimeSeriesKANAttentionLayer, self).__init__()
         self.W = tf.keras.layers.Dense(units)
         self.V = tf.keras.layers.Dense(1)
@@ -28,7 +28,7 @@ class TimeSeriesKANAttentionLayer(tf.keras.layers.Layer):
 
 class TimeSeriesKAN(tf.keras.Model):
     def __init__(self, hidden_size, output_size, kan_layer, num_lstm_layers=1, lstm_kwargs=None, dropout_rate=0.1,
-                 output_activation=None):
+                 output_activation=None, **kwargs):
         super(TimeSeriesKAN, self).__init__()
 
         if not isinstance(kan_layer, BaseKANLayer):
@@ -47,8 +47,8 @@ class TimeSeriesKAN(tf.keras.Model):
 
         self.attention = TimeSeriesKANAttentionLayer(hidden_size)
         self.kan_layer = kan_layer
-        # Ensure kan_layer is built with the correct input shape
-        self.kan_layer.build((None, None, hidden_size))  # (batch_size, time_steps, hidden_size)
+        # # Ensure kan_layer is built with the correct input shape
+        # self.kan_layer.build((None, None, hidden_size))  # (batch_size, time_steps, hidden_size)
         self.output_layer = tf.keras.layers.Dense(output_size, activation=output_activation)
         self.reshape = None
         self.residual_layer = tf.keras.layers.Dense(output_size)

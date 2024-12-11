@@ -6,8 +6,13 @@ from network.kan.layer import BaseKANLayer
 class BSplineKANLayer(BaseKANLayer):
     def __init__(self, out_features, grid_size=5, spline_order=3, scale_noise=0.1,
                  scale_base=1.0, scale_spline=1.0, enable_standalone_scale_spline=True,
-                 base_activation=tf.nn.silu, grid_eps=0.02, grid_range=[-1, 1]):
+                 base_activation=tf.nn.silu, grid_eps=0.02, grid_range=[-1, 1],
+                 spline_scaler=None, spline_weight=None, base_weight=None, grid=None, **kwargs):
         super(BSplineKANLayer, self).__init__()
+        self.spline_scaler = spline_scaler
+        self.spline_weight = spline_weight
+        self.base_weight = base_weight
+        self.grid = grid
         self.out_features = out_features
         self.grid_size = grid_size
         self.spline_order = spline_order
@@ -165,7 +170,11 @@ class BSplineKANLayer(BaseKANLayer):
             'enable_standalone_scale_spline': self.enable_standalone_scale_spline,
             'base_activation': self.base_activation,
             'grid_eps': self.grid_eps,
-            'grid_range': self.grid_range
+            'grid_range': self.grid_range,
+            'spline_scaler': self.spline_scaler,
+            'spline_weight': self.spline_weight,
+            'base_weight': self.base_weight,
+            'grid': self.grid
         })
         return config
 

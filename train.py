@@ -169,7 +169,7 @@ def main(model_type, use_sample_data=False):
             'data/ticker_split.json'
         )
         logger.info("Getting train/val/test ticker split...")
-        train_tickers, val_tickers, test_tickers = get_ticker_split('data/ticker_split.json')
+        train_tickers, val_tickers, _ = get_ticker_split('data/ticker_split.json')
 
         # Create WindowGenerator for train and validation data
         window_generator = WindowGenerator(

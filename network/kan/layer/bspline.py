@@ -4,15 +4,21 @@ from network.kan.layer import BaseKANLayer
 
 
 class BSplineKANLayer(BaseKANLayer):
-    def __init__(self, out_features, grid_size=5, spline_order=3, scale_noise=0.1,
-                 scale_base=1.0, scale_spline=1.0, enable_standalone_scale_spline=True,
-                 base_activation=tf.nn.silu, grid_eps=0.02, grid_range=[-1, 1],
-                 spline_scaler=None, spline_weight=None, base_weight=None, grid=None, **kwargs):
+    def __init__(
+            self,
+            out_features,
+            grid_size=5,
+            spline_order=3,
+            scale_noise=0.1,
+            scale_base=1.0,
+            scale_spline=1.0,
+            enable_standalone_scale_spline=True,
+            base_activation=tf.nn.silu,
+            grid_eps=0.02,
+            grid_range=[-1, 1],
+            **kwargs
+    ):
         super(BSplineKANLayer, self).__init__()
-        self.spline_scaler = spline_scaler
-        self.spline_weight = spline_weight
-        self.base_weight = base_weight
-        self.grid = grid
         self.out_features = out_features
         self.grid_size = grid_size
         self.spline_order = spline_order
@@ -29,7 +35,13 @@ class BSplineKANLayer(BaseKANLayer):
         h = (self.grid_range[1] - self.grid_range[0]) / self.grid_size
         grid = tf.range(-self.spline_order, self.grid_size + self.spline_order + 1, dtype=tf.float64) * h + \
                self.grid_range[0]
-        self.grid = tf.tile(tf.expand_dims(grid, 0), [self.in_features, 1])
+        self.grid = tf.Variable(
+            tf.tile(tf.expand_dims(grid, 0), [self.in_features, 1]),
+            trainable=False,
+            dtype=tf.float64,
+            name="grid"
+        )
+
         self.base_weight = self.add_weight(
             name="base_weight",
             shape=(self.in_features, self.out_features),
@@ -37,19 +49,24 @@ class BSplineKANLayer(BaseKANLayer):
             dtype=tf.float64,
             trainable=True
         )
+
         self.spline_weight = self.add_weight(
             name="spline_weight",
             shape=(self.out_features, self.in_features, self.grid_size + self.spline_order),
             initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_spline),
+            dtype=tf.float64,
             trainable=True
         )
+
         if self.enable_standalone_scale_spline:
             self.spline_scaler = self.add_weight(
                 name="spline_scaler",
                 shape=(self.out_features, self.in_features),
                 initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_spline),
+                dtype=tf.float64,
                 trainable=True
             )
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -63,7 +80,7 @@ class BSplineKANLayer(BaseKANLayer):
             coeff *= self.scale_spline
         self.spline_weight.assign(coeff)
 
-    @tf.function
+    @tf.function(input_signature=[tf.TensorSpec(shape=(None, None), dtype=tf.float64)])
     def b_splines(self, x):
         x = tf.expand_dims(x, -1)
         bases = tf.cast(
@@ -98,12 +115,15 @@ class BSplineKANLayer(BaseKANLayer):
         x = tf.cast(x, tf.float64)
         original_shape = tf.shape(x)
         x = tf.reshape(x, [-1, self.in_features])
+
         base_output = tf.matmul(self.base_activation(x), self.base_weight)
-        spline_output = tf.matmul(
-            tf.reshape(self.b_splines(x), [tf.shape(x)[0], -1]),
-            tf.reshape(self.scaled_spline_weight, [self.out_features, -1]),
-            transpose_b=True
-        )
+
+        splines = self.b_splines(x)
+        splines_reshaped = tf.reshape(splines, [tf.shape(x)[0], -1])
+        scaled_spline_weight_reshaped = tf.reshape(self.scaled_spline_weight, [self.out_features, -1])
+
+        spline_output = tf.matmul(splines_reshaped, scaled_spline_weight_reshaped, transpose_b=True)
+
         output = base_output + spline_output
         output = tf.reshape(output, tf.concat([original_shape[:-1], [self.out_features]], axis=0))
         return output

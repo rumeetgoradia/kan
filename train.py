@@ -4,13 +4,14 @@ import logging
 import time
 
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Dense, Dropout, LSTM
 from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
 
-from data.processor import prepare_data, get_ticker_split
-from data.window_generator import WindowGenerator
+from constants import *
+from data import *
 from network import ThreeDimensionalR2Score
 from network.kan import TimeSeriesKAN
 from network.kan.layer import *
@@ -19,42 +20,50 @@ from network.kan.layer import *
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Check for GPU availability
-physical_devices = tf.config.list_physical_devices('GPU')
-if len(physical_devices) > 0:
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
-    print("GPU is available. Using GPU.")
-else:
-    print("No GPU available. Using CPU.")
 
-# Set the device
-device = "/gpu:0" if len(physical_devices) > 0 else "/cpu:0"
+def get_data(stock_market_data_filepath, ticker_splits_filepath, sequence_length, lookahead, output_features,
+             batch_size):
+    logger.info("Loading stock market data...")
+    all_data = pd.read_csv(stock_market_data_filepath, parse_dates=['Date'])
+
+    logger.info("Splitting data...")
+    ticker_splits = create_ticker_splits({'train': 0.7, 'val': 0.15, 'test': 0.15}, all_data, ticker_splits_filepath)
+    split_dataframes = create_split_dataframes(ticker_splits, all_data)
+
+    logger.info("Creating training dataset...")
+    train = create_sequenced_tf_dataset(split_dataframes[TRAIN_KEY], sequence_length, lookahead,
+                                        output_features, batch_size)
+    logger.info("Creating validation dataset...")
+    val = create_sequenced_tf_dataset(split_dataframes[VAL_KEY], sequence_length, lookahead, output_features,
+                                      batch_size)
+
+    return {TRAIN_KEY: train, VAL_KEY: val}
 
 
-def create_lstm_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
+def create_lstm_model(input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2):
     inputs = keras.Input(shape=input_shape, dtype="float64")
     x = inputs
     x = LSTM(units, return_sequences=True)(x)
     x = Dropout(dropout_rate)(x)
     x = LSTM(units)(x)
     x = Dropout(dropout_rate)(x)
-    outputs = Dense(output_features * label_width)(x)
-    outputs = keras.layers.Reshape((label_width, output_features))(outputs)
+    outputs = Dense(num_output_features * lookahead)(x)
+    outputs = keras.layers.Reshape((lookahead, num_output_features))(outputs)
     return keras.Model(inputs=inputs, outputs=outputs)
 
 
-def create_mlp_model(input_shape, output_features, label_width, units=64, dropout_rate=0.2):
+def create_mlp_model(input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2):
     inputs = keras.Input(shape=input_shape, dtype="float64")
     x = keras.layers.Flatten()(inputs)
     x = Dense(units, activation='relu', kernel_initializer='he_normal')(x)
     x = Dropout(dropout_rate)(x)
     x = Dense(units // 2, activation='relu', kernel_initializer='he_normal')(x)
-    outputs = Dense(output_features * label_width, activation='linear')(x)
-    outputs = keras.layers.Reshape((label_width, output_features))(outputs)
+    outputs = Dense(num_output_features * lookahead, activation='linear')(x)
+    outputs = keras.layers.Reshape((lookahead, num_output_features))(outputs)
     return keras.Model(inputs=inputs, outputs=outputs)
 
 
-def create_kan_model(input_shape, output_features, label_width, kan_type, hidden_size=64, kan_size=32,
+def create_kan_model(lookahead, num_output_features, kan_type, hidden_size=64, kan_size=32,
                      **kan_kwargs):
     if kan_type.lower() == 'chebyshev':
         kan_layer = ChebyshevKANLayer(out_features=kan_size, **kan_kwargs)
@@ -64,24 +73,26 @@ def create_kan_model(input_shape, output_features, label_width, kan_type, hidden
         kan_layer = FourierKANLayer(out_features=kan_size, **kan_kwargs)
     elif kan_type.lower() == 'legendre':
         kan_layer = LegendreKANLayer(out_features=kan_size, **kan_kwargs)
-    elif kan_type.lower() == 'wavelet':
-        kan_layer = WaveletKANLayer(out_features=kan_size, **kan_kwargs)
+    # elif kan_type.lower() == 'wavelet':
+    #     kan_layer = WaveletKANLayer(out_features=kan_size, **kan_kwargs)
     else:
         raise ValueError(f"Unsupported KAN type: {kan_type}")
 
-    model = TimeSeriesKAN(hidden_size=hidden_size, output_size=output_features * label_width,
+    model = TimeSeriesKAN(hidden_size=hidden_size, lookahead=lookahead, num_output_features=num_output_features,
                           kan_layer=kan_layer)
-    model.reshape = tf.keras.layers.Reshape((label_width, output_features))
     return model
 
 
-def create_and_compile_model(model_type, input_shape, output_features, label_width, learning_rate=0.001, **kwargs):
+def create_and_compile_model(model_type, input_shape, lookahead, num_output_features, learning_rate=0.001, **kwargs):
     if model_type.lower() == 'lstm':
-        model = create_lstm_model(input_shape, output_features, label_width, **kwargs)
+        model = create_lstm_model(input_shape=input_shape, lookahead=lookahead, num_output_features=num_output_features,
+                                  **kwargs)
     elif model_type.lower() == 'mlp':
-        model = create_mlp_model(input_shape, output_features, label_width, **kwargs)
+        model = create_mlp_model(input_shape=input_shape, lookahead=lookahead, num_output_features=num_output_features,
+                                 **kwargs)
     elif model_type.lower() in ['bspline', 'chebyshev', 'fourier', 'legendre', 'wavelet']:
-        model = create_kan_model(input_shape, output_features, label_width, kan_type=model_type, **kwargs)
+        model = create_kan_model(lookahead=lookahead, num_output_features=num_output_features, kan_type=model_type,
+                                 **kwargs)
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -127,99 +138,47 @@ def train_model(model, train_data, val_data, epochs):
     return history, training_time
 
 
-def generate_sample_data(num_samples=1000, input_width=30, input_features=43, output_features=3, label_width=5):
-    # Generate random input data
-    X = np.random.randn(num_samples, input_width, input_features)
-
-    # Generate random output data
-    y = np.random.randn(num_samples, label_width, output_features)
-
-    # Split into train, validation, and test sets
-    train_split = int(0.7 * num_samples)
-    val_split = int(0.85 * num_samples)
-
-    X_train, y_train = X[:train_split], y[:train_split]
-    X_val, y_val = X[train_split:val_split], y[train_split:val_split]
-    X_test, y_test = X[val_split:], y[val_split:]
-
-    # Create TensorFlow datasets
-    train_data = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(32)
-    val_data = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(32)
-    test_data = tf.data.Dataset.from_tensor_slices((X_test, y_test)).batch(32)
-
-    return train_data, val_data, test_data, input_features, output_features
-
-
-def main(model_type, use_sample_data=False):
+def main(model_type, save_model=True):
     tf.keras.backend.set_floatx('float64')
-    # Parameters
-    input_width = 30
-    label_width = 5
-    shift = 5
 
-    if use_sample_data:
-        logger.info("Generating sample data...")
-        train_data, val_data, test_data, input_features, output_features = generate_sample_data(
-            input_width=input_width, label_width=label_width)
-    else:
-        logger.info("Preparing data...")
-        df, input_features, output_features, stock_scalers, market_scaler, encoders = prepare_data(
-            'data/processed/sp500.csv',
-            'data/processed/market.csv',
-            'data/ticker_split.json'
-        )
-        logger.info("Getting train/val/test ticker split...")
-        train_tickers, val_tickers, _ = get_ticker_split('data/ticker_split.json')
+    data = get_data(stock_market_data_filepath=STOCK_MARKET_DATA_FILEPATH,
+                    ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
+                    output_features=OUTPUT_FEATURES,
+                    lookahead=LOOKAHEAD,
+                    sequence_length=SEQUENCE_LENGTH,
+                    batch_size=BATCH_SIZE
+                    )
 
-        # Create WindowGenerator for train and validation data
-        window_generator = WindowGenerator(
-            input_width=input_width,
-            label_width=label_width,
-            shift=shift,
-            train_df=df[df['ticker'].isin(train_tickers)],
-            val_df=df[df['ticker'].isin(val_tickers)],
-            test_df=None,  # We don't use test data here
-            label_columns=output_features
-        )
+    train_data, train_input_shape, train_output_shape = data[TRAIN_KEY]
+    val_data, val_input_shape, val_output_shape = data[VAL_KEY]
 
-        # Get the datasets
-        train_data = window_generator.train
-        val_data = window_generator.val
-        input_features = len(input_features)
-        output_features = len(output_features)
+    if train_input_shape != val_input_shape or train_output_shape != val_output_shape:
+        raise ValueError(f"Train and validation shapes do not match. "
+                         f"Train shapes: input {train_input_shape}, output {train_output_shape}. "
+                         f"Validation shapes: input {val_input_shape}, output {val_output_shape}.")
 
-    input_shape = (input_width, input_features)
     logger.info(f"Creating {model_type} model...")
-    with tf.device(device):
-        if model_type.startswith('kan-'):
-            kan_type = model_type.split('-')[1]
-            model = create_and_compile_model(kan_type, input_shape, output_features, label_width, learning_rate=0.001,
-                                             hidden_size=64, kan_size=32)
-        else:
-            model = create_and_compile_model(model_type, input_shape, output_features, label_width,
-                                             learning_rate=0.001)
+    if model_type.startswith('kan-'):
+        kan_type = model_type.split('-')[1]
+        model = create_and_compile_model(input_shape=train_input_shape, lookahead=LOOKAHEAD, model_type=kan_type,
+                                         num_output_features=len(OUTPUT_FEATURES), learning_rate=LEARNING_RATE,
+                                         hidden_size=64, kan_size=32)
+    else:
+        model = create_and_compile_model(model_type=model_type, input_shape=train_input_shape,
+                                         lookahead=LOOKAHEAD, num_output_features=len(OUTPUT_FEATURES),
+                                         learning_rate=LEARNING_RATE)
 
-        history, training_time = train_model(model, train_data, val_data, epochs=100)
+    history, training_time = train_model(model, train_data, val_data, epochs=EPOCHS)
 
-        logger.info("Saving model...")
+    history_dict = history.history
+    history_dict['training_time'] = training_time
 
-        if use_sample_data:
-            model.save(f'results/models/{model_type}_sample_model.keras')
-        else:
-            model.save(f'results/models/{model_type}_model.keras')
+    if save_model:
+        model.save(f'results/models/{model_type}_model.keras')
+        with open(f'results/metrics/{model_type}_history.json', 'w') as f:
+            json.dump(history_dict, f)
 
-        # Save training history and time
-        history_dict = history.history
-        history_dict['training_time'] = training_time
-
-        if use_sample_data:
-            with open(f'results/metrics/{model_type}_sample_history.json', 'w') as f:
-                json.dump(history_dict, f)
-        else:
-            with open(f'results/metrics/{model_type}_history.json', 'w') as f:
-                json.dump(history_dict, f)
-
-        logger.info(f"Training time: {training_time:.2f} seconds")
+    logger.info(f"Training time: {training_time:.2f} seconds")
 
     logger.info("Process completed successfully.")
 
@@ -229,6 +188,6 @@ if __name__ == "__main__":
     parser.add_argument("model_type",
                         choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier', 'kan-legendre'],
                         help="Type of model to use")
-    parser.add_argument("--sample", action="store_true", help="Use sample data for quick testing")
+    parser.add_argument("--no-save", action="store_true", help="Do not save the model or training history")
     args = parser.parse_args()
-    main(args.model_type, args.sample)
+    main(args.model_type, not args.no_save)

@@ -15,6 +15,7 @@ from data.window_generator import WindowGenerator
 from network import ThreeDimensionalR2Score
 from network.kan import TimeSeriesKAN, TimeSeriesKANAttentionLayer
 from network.kan.layer import *
+from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
 
 # Set up directories
 MODELS_DIR = 'results/models'
@@ -22,14 +23,14 @@ METRICS_DIR = 'results/metrics'
 ANALYSIS_DIR = 'results/analysis'
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
-
 # Parameters
 input_width = 30
 label_width = 5
 output_features = 3
 shift = 5
 
-def custom_load_model(model_path):
+
+def custom_load_model(model_path, learning_rate=0.001):
     custom_objects = {
         'BaseKANLayer': BaseKANLayer,
         'BSplineKANLayer': BSplineKANLayer,
@@ -43,21 +44,18 @@ def custom_load_model(model_path):
 
     # Load the model with custom objects
     model = load_model(model_path, custom_objects=custom_objects, compile=False)
-    if 'kan-' in model_path:
-        model.reshape = tf.keras.layers.Reshape((label_width, output_features))
 
-    # Patch the model if it's a TimeSeriesKAN
-    if isinstance(model, TimeSeriesKAN):
-        # Find the KAN layer
-        kan_layer = None
-        for layer in model.layers:
-            if isinstance(layer, BaseKANLayer):
-                kan_layer = layer
-                break
-
-        if kan_layer is not None:
-            # Manually set the kan_layer attribute
-            model.kan_layer = kan_layer
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.0)
+    model.compile(
+        optimizer=optimizer,
+        loss=tf.keras.losses.MeanSquaredError(),
+        metrics=[
+            MeanAbsoluteError(name='mae'),
+            MeanSquaredError(name='mse'),
+            RootMeanSquaredError(name='rmse'),
+            ThreeDimensionalR2Score(name='r2')
+        ]
+    )
 
     return model
 
@@ -69,16 +67,7 @@ for file in os.listdir(MODELS_DIR):
         model_name = file.split('_')[0]
         model_path = os.path.join(MODELS_DIR, file)
         try:
-            models[model_name] = load_model(model_path, custom_objects={
-                'BaseKANLayer': BaseKANLayer,
-                'BSplineKANLayer': BSplineKANLayer,
-                'ChebyshevKANLayer': ChebyshevKANLayer,
-                'FourierKANLayer': FourierKANLayer,
-                'LegendreKANLayer': LegendreKANLayer,
-                'TimeSeriesKAN': TimeSeriesKAN,
-                'AttentionLayer': TimeSeriesKANAttentionLayer,
-                'CustomR2Score': ThreeDimensionalR2Score
-            })
+            models[model_name] = custom_load_model(model_path)
             print(f"Loaded model: {model_name}")
         except Exception as e:
             print(f"Error loading model {model_name}: {e}")
@@ -170,61 +159,61 @@ X_test = np.concatenate(X_test, axis=0)
 y_test = np.concatenate(y_test, axis=0)
 
 # Computational efficiency comparison
-efficiency_data = []
-for name, model in models.items():
-    inference_time, num_params = get_model_stats(model, X_test)
-    efficiency_data.append({
-        'Model': name,
-        'Inference Time (s)': inference_time,
-        'Number of Parameters': num_params
-    })
-
-efficiency_df = pd.DataFrame(efficiency_data)
-print("Computational Efficiency Comparison:")
-print(efficiency_df)
-efficiency_df.to_csv(os.path.join(ANALYSIS_DIR, 'computational_efficiency.csv'), index=False)
-
-
-# Hyperparameter settings table
-def get_hyperparameters(model):
-    hyperparams = {}
-    for layer in model.layers:
-        if isinstance(layer, tf.keras.layers.LSTM):
-            hyperparams['LSTM Units'] = layer.units
-        elif isinstance(layer, tf.keras.layers.Dense):
-            hyperparams['Dense Units'] = layer.units
-
-    # Handle different ways to access learning rate
-    if hasattr(model.optimizer, 'lr'):
-        lr = model.optimizer.lr
-    elif hasattr(model.optimizer, 'learning_rate'):
-        lr = model.optimizer.learning_rate
-    else:
-        lr = None
-
-    if lr is not None:
-        if callable(lr):
-            hyperparams['Learning Rate'] = lr().numpy()
-        else:
-            hyperparams['Learning Rate'] = lr.numpy()
-    else:
-        hyperparams['Learning Rate'] = 'Unknown'
-
-    return hyperparams
-
-
-hyperparameter_data = []
-for name, model in models.items():
-    if not hasattr(model, 'optimizer') or model.optimizer is None:
-        print(f"Warning: Model {name} is not compiled. Skipping hyperparameter extraction.")
-        continue
-    hyperparams = get_hyperparameters(model)
-    hyperparams['Model'] = name
-    hyperparameter_data.append(hyperparams)
-hyperparameter_df = pd.DataFrame(hyperparameter_data)
-print("\nHyperparameter Settings:")
-print(hyperparameter_df)
-hyperparameter_df.to_csv(os.path.join(ANALYSIS_DIR, 'hyperparameter_settings.csv'), index=False)
+# efficiency_data = []
+# for name, model in models.items():
+#     inference_time, num_params = get_model_stats(model, X_test)
+#     efficiency_data.append({
+#         'Model': name,
+#         'Inference Time (s)': inference_time,
+#         'Number of Parameters': num_params
+#     })
+#
+# efficiency_df = pd.DataFrame(efficiency_data)
+# print("Computational Efficiency Comparison:")
+# print(efficiency_df)
+# efficiency_df.to_csv(os.path.join(ANALYSIS_DIR, 'computational_efficiency.csv'), index=False)
+#
+#
+# # Hyperparameter settings table
+# def get_hyperparameters(model):
+#     hyperparams = {}
+#     for layer in model.layers:
+#         if isinstance(layer, tf.keras.layers.LSTM):
+#             hyperparams['LSTM Units'] = layer.units
+#         elif isinstance(layer, tf.keras.layers.Dense):
+#             hyperparams['Dense Units'] = layer.units
+#
+#     # Handle different ways to access learning rate
+#     if hasattr(model.optimizer, 'lr'):
+#         lr = model.optimizer.lr
+#     elif hasattr(model.optimizer, 'learning_rate'):
+#         lr = model.optimizer.learning_rate
+#     else:
+#         lr = None
+#
+#     if lr is not None:
+#         if callable(lr):
+#             hyperparams['Learning Rate'] = lr().numpy()
+#         else:
+#             hyperparams['Learning Rate'] = lr.numpy()
+#     else:
+#         hyperparams['Learning Rate'] = 'Unknown'
+#
+#     return hyperparams
+#
+#
+# hyperparameter_data = []
+# for name, model in models.items():
+#     if not hasattr(model, 'optimizer') or model.optimizer is None:
+#         print(f"Warning: Model {name} is not compiled. Skipping hyperparameter extraction.")
+#         continue
+#     hyperparams = get_hyperparameters(model)
+#     hyperparams['Model'] = name
+#     hyperparameter_data.append(hyperparams)
+# hyperparameter_df = pd.DataFrame(hyperparameter_data)
+# print("\nHyperparameter Settings:")
+# print(hyperparameter_df)
+# hyperparameter_df.to_csv(os.path.join(ANALYSIS_DIR, 'hyperparameter_settings.csv'), index=False)
 
 # Calculate and save metrics for each model
 metrics_data = []

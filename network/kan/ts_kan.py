@@ -4,10 +4,16 @@ from network.kan.layer import BaseKANLayer
 
 
 class TimeSeriesKANAttentionLayer(tf.keras.layers.Layer):
-    def __init__(self, units, **kwargs):
+    def __init__(self, units):
         super(TimeSeriesKANAttentionLayer, self).__init__()
-        self.W = tf.keras.layers.Dense(units)
+        self.units = units
+        self.W = None
+        self.V = None
+
+    def build(self, input_shape):
+        self.W = tf.keras.layers.Dense(self.units)
         self.V = tf.keras.layers.Dense(1)
+        super(TimeSeriesKANAttentionLayer, self).build(input_shape)
 
     def call(self, encoder_output):
         score = self.V(tf.nn.tanh(self.W(encoder_output)))
@@ -27,41 +33,51 @@ class TimeSeriesKANAttentionLayer(tf.keras.layers.Layer):
 
 
 class TimeSeriesKAN(tf.keras.Model):
-    def __init__(self, hidden_size, output_size, kan_layer, num_lstm_layers=1, lstm_kwargs=None, dropout_rate=0.1,
-                 output_activation=None, **kwargs):
+    def __init__(self, hidden_size, lookahead, num_output_features, kan_layer, num_lstm_layers=1, lstm_kwargs=None,
+                 dropout_rate=0.1, output_activation=None, **kwargs):
         super(TimeSeriesKAN, self).__init__()
 
-        if not isinstance(kan_layer, BaseKANLayer):
-            raise TypeError("kan_layer must be an instance of BaseKANLayer")
-
-        lstm_kwargs = lstm_kwargs or {}
-        if num_lstm_layers > 1:
-            self.lstm = tf.keras.Sequential([
-                                                tf.keras.layers.LSTM(hidden_size, return_sequences=True, **lstm_kwargs)
-                                                for _ in range(num_lstm_layers - 1)
-                                            ] + [tf.keras.layers.LSTM(hidden_size, return_sequences=True,
-                                                                      **lstm_kwargs)])
-        else:
-            self.lstm = tf.keras.layers.LSTM(hidden_size, return_sequences=True, **lstm_kwargs)
-            self.layer_norm = tf.keras.layers.LayerNormalization()
-
-        self.attention = TimeSeriesKANAttentionLayer(hidden_size)
-        self.kan_layer = kan_layer
-        # # Ensure kan_layer is built with the correct input shape
-        # self.kan_layer.build((None, None, hidden_size))  # (batch_size, time_steps, hidden_size)
-        self.output_layer = tf.keras.layers.Dense(output_size, activation=output_activation)
-        self.reshape = None
-        self.residual_layer = tf.keras.layers.Dense(output_size)
-        self.dropout = tf.keras.layers.Dropout(dropout_rate)
-
-        # Store the initialization parameters
         self.hidden_size = hidden_size
-        self.output_size = output_size
-        self.kan_layer = kan_layer
+        self.lookahead = lookahead
+        self.num_output_features = lookahead * num_output_features
         self.num_lstm_layers = num_lstm_layers
         self.lstm_kwargs = lstm_kwargs or {}
         self.dropout_rate = dropout_rate
         self.output_activation = output_activation
+
+        if not isinstance(kan_layer, BaseKANLayer):
+            raise TypeError("kan_layer must be an instance of BaseKANLayer")
+
+        self.kan_layer = kan_layer
+
+        self.lstm = None
+        self.layer_norm = None
+        self.attention = None
+        self.output_layer = None
+        self.residual_layer = None
+        self.dropout = None
+        self.reshape = tf.keras.layers.Reshape((lookahead, num_output_features))
+
+    def build(self, input_shape):
+        # LSTM layers
+        if self.num_lstm_layers > 1:
+            self.lstm = tf.keras.Sequential([
+                                                tf.keras.layers.LSTM(self.hidden_size, return_sequences=True,
+                                                                     **self.lstm_kwargs)
+                                                for _ in range(self.num_lstm_layers - 1)
+                                            ] + [tf.keras.layers.LSTM(self.hidden_size, return_sequences=True,
+                                                                      **self.lstm_kwargs)])
+        else:
+            self.lstm = tf.keras.layers.LSTM(self.hidden_size, return_sequences=True, **self.lstm_kwargs)
+
+        self.layer_norm = tf.keras.layers.LayerNormalization()
+        self.attention = TimeSeriesKANAttentionLayer(self.hidden_size)
+
+        self.output_layer = tf.keras.layers.Dense(self.num_output_features, activation=self.output_activation)
+        self.residual_layer = tf.keras.layers.Dense(self.num_output_features)
+        self.dropout = tf.keras.layers.Dropout(self.dropout_rate)
+
+        super(TimeSeriesKAN, self).build(input_shape)
 
     def call(self, inputs):
         lstm_out = self.layer_norm(self.lstm(inputs))
@@ -95,16 +111,18 @@ class TimeSeriesKAN(tf.keras.Model):
         config = super(TimeSeriesKAN, self).get_config()
         config.update({
             'hidden_size': self.hidden_size,
-            'output_size': self.output_size,
+            'lookahead': self.lookahead,
+            'num_output_features': self.num_output_features,
             'kan_layer': tf.keras.utils.serialize_keras_object(self.kan_layer),
             'num_lstm_layers': self.num_lstm_layers,
             'lstm_kwargs': self.lstm_kwargs,
             'dropout_rate': self.dropout_rate,
-            'output_activation': self.output_activation,
+            'output_activation': self.output_activation
         })
         return config
 
     @classmethod
     def from_config(cls, config):
-        kan_layer = tf.keras.utils.deserialize_keras_object(config.pop('kan_layer'))
+        kan_layer_config = config.pop('kan_layer')
+        kan_layer = tf.keras.utils.deserialize_keras_object(kan_layer_config)
         return cls(kan_layer=kan_layer, **config)

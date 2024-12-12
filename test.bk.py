@@ -106,7 +106,7 @@ def load_training_history(model_name):
         with open(history_path, 'r') as f:
             return json.load(f)
     else:
-        print(f"Warning: No training history found for {model_name}")
+        print(f"Warning: No train history found for {model_name}")
         return None
 
 

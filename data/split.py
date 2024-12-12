@@ -26,11 +26,11 @@ def create_ticker_splits(split_ratios: Dict[str, float], stock_data: pd.DataFram
     Dict[str, List[str]]: A dictionary with 'train', 'val', 'test' as keys and lists of tickers as values.
     """
     if os.path.exists(output_file):
-        logger.info(f"Loading existing ticker splits from {output_file}")
+        logger.info(f"Loading existing ticker splits from {output_file}...")
         with open(output_file, 'r') as f:
             return json.load(f)
 
-    logger.info("Creating new ticker splits")
+    logger.info("Creating new ticker splits...")
 
     # Validate split ratios
     if not math.isclose(sum(split_ratios.values()), 1, rel_tol=1e-9):
@@ -89,7 +89,6 @@ def create_split_dataframes(splits: Dict[str, List[str]], stock_data: pd.DataFra
             logger.warning("'Date' not found in columns or index. Dataframe will not be sorted by date.")
 
         split_dfs[split_name] = split_df
-        logger.info(f"{split_name.capitalize()} set shape: {split_df.shape}")
 
     return split_dfs
 

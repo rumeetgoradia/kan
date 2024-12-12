@@ -20,3 +20,5 @@ SPLIT_RATIOS = {TRAIN_KEY: 0.7, VAL_KEY: 0.15, TEST_KEY: 0.15}
 
 # Random seed for reproducibility
 RANDOM_SEED = 42
+
+MODEL_FILE_NAME = lambda model_name: f"{model_name}_model.keras"

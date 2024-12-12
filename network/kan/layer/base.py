@@ -17,6 +17,7 @@ class BaseKANLayer(tf.keras.layers.Layer):
         )
         super(BaseKANLayer, self).build(input_shape)
 
+    @tf.function
     def call(self, inputs):
         raise NotImplementedError
 

@@ -64,8 +64,6 @@ def create_sequenced_tf_dataset(df: pd.DataFrame, sequence_length: int, lookahea
     input_shape = (sequence_length, len(input_features))
     output_shape = (lookahead, len(output_features))
 
-    logger.info(f"Input sample shape: {input_shape}, Output sample shape: {output_shape}")
-
     return dataset, input_shape, output_shape
 
 

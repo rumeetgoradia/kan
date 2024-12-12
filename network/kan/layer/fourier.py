@@ -1,66 +1,80 @@
-import numpy as np
 import tensorflow as tf
-
 from network.kan.layer import BaseKANLayer
-
+import numpy as np
 
 class FourierKANLayer(BaseKANLayer):
-    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0,
-                 fourier_weight=None, base_weight=None, **kwargs):
-        super(FourierKANLayer, self).__init__()
-        self.fourier_weight = fourier_weight
-        self.base_weight = base_weight
+    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0, **kwargs):
+        super(FourierKANLayer, self).__init__(**kwargs)
         self.out_features = out_features
         self.num_frequencies = num_frequencies
         self.scale_base = scale_base
         self.scale_fourier = scale_fourier
-
+        self.activity_regularizer = tf.keras.regularizers.L2(1e-5)
 
     def build(self, input_shape):
-        self.in_features = input_shape[-1]  # Store the number of input features
+        self.in_features = input_shape[-1]
         self.base_weight = self.add_weight(
             name="base_weight",
             shape=(self.in_features, self.out_features),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
-            dtype=tf.float64,  # Ensure consistent dtype
+            initializer=tf.keras.initializers.GlorotUniform(),
+            dtype=tf.float32,
             trainable=True
         )
         self.fourier_weight = self.add_weight(
             name="fourier_weight",
             shape=(self.in_features, self.out_features, 2 * self.num_frequencies),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_fourier),
-            dtype=tf.float64,  # Ensure consistent dtype
+            initializer=tf.keras.initializers.GlorotUniform(),
+            dtype=tf.float32,
             trainable=True
         )
 
+    @tf.function
     def fourier_basis(self, x):
-        # Normalize x to the range [0, 2π]
-        x_scaled = 2 * np.pi * (x - tf.reduce_min(x, axis=-1, keepdims=True)) / (
-                tf.reduce_max(x, axis=-1, keepdims=True) - tf.reduce_min(x, axis=-1, keepdims=True))
+        x_min = tf.reduce_min(x, axis=-1, keepdims=True)
+        x_max = tf.reduce_max(x, axis=-1, keepdims=True)
+        x_scaled = 2 * np.pi * (x - x_min) / (x_max - x_min + tf.keras.backend.epsilon())
 
-        # Compute sine and cosine terms
-        frequencies = tf.range(1, self.num_frequencies + 1, dtype=tf.float64)
+        frequencies = tf.range(1, self.num_frequencies + 1, dtype=tf.float32)
         sin_terms = tf.sin(frequencies * x_scaled[..., tf.newaxis])
         cos_terms = tf.cos(frequencies * x_scaled[..., tf.newaxis])
 
-        # Concatenate sine and cosine terms
         return tf.concat([sin_terms, cos_terms], axis=-1)
 
     @tf.function
     def call(self, x):
-        x = tf.cast(x, tf.float64)
-        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        # Compute base output
+        base_output = tf.matmul(x, self.base_weight)
+        base_output = tf.nn.silu(base_output)
+
+        # Compute Fourier output
         fourier_basis = self.fourier_basis(x)
         fourier_output = tf.einsum('bi,iod,bid->bo', x, self.fourier_weight, fourier_basis)
-        return base_output + fourier_output
 
-    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
-        l1_fake = tf.reduce_mean(tf.abs(self.fourier_weight), axis=-1)
-        regularization_loss_activation = tf.reduce_sum(l1_fake)
-        p = l1_fake / regularization_loss_activation
-        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
-        return (regularize_activation * regularization_loss_activation
-                + regularize_entropy * regularization_loss_entropy)
+        output = base_output + fourier_output
+        return output
+
+    @tf.function
+    def regularization_loss(self):
+        # L1-like regularization for base_weight
+        base_l1 = tf.reduce_sum(tf.abs(self.base_weight))
+
+        # L1-like regularization for fourier_weight
+        fourier_l1 = tf.reduce_sum(tf.abs(self.fourier_weight))
+
+        # Combine regularization losses
+        total_l1 = base_l1 + fourier_l1
+
+        # Entropy regularization
+        p_base = tf.abs(self.base_weight) / (total_l1 + tf.keras.backend.epsilon())
+        p_fourier = tf.abs(self.fourier_weight) / (total_l1 + tf.keras.backend.epsilon())
+
+        entropy_base = -tf.reduce_sum(p_base * tf.math.log(p_base + tf.keras.backend.epsilon()))
+        entropy_fourier = -tf.reduce_sum(p_fourier * tf.math.log(p_fourier + tf.keras.backend.epsilon()))
+
+        return total_l1 + entropy_base + entropy_fourier
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], self.out_features)
 
     def get_config(self):
         config = super(FourierKANLayer, self).get_config()
@@ -69,8 +83,6 @@ class FourierKANLayer(BaseKANLayer):
             'num_frequencies': self.num_frequencies,
             'scale_base': self.scale_base,
             'scale_fourier': self.scale_fourier,
-            'fourier_weight': self.fourier_weight,
-            'base_weight': self.base_weight
         })
         return config
 

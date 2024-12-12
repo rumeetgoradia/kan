@@ -21,14 +21,14 @@ class WaveletKANLayer(BaseKANLayer):
             name="base_weight",
             shape=(self.in_features, self.out_features),
             initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
-            dtype=tf.float64,
+            dtype=tf.float32,
             trainable=True
         )
         self.wavelet_weight = self.add_weight(
             name="wavelet_weight",
             shape=(self.in_features, self.out_features, self.num_levels),
             initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_wavelet),
-            dtype=tf.float64,
+            dtype=tf.float32,
             trainable=True
         )
 
@@ -45,7 +45,7 @@ class WaveletKANLayer(BaseKANLayer):
 
     @tf.function
     def call(self, x):
-        x = tf.cast(x, tf.float64)
+        x = tf.cast(x, tf.float32)
         base_output = tf.keras.activations.swish(x) @ self.base_weight
         wavelet_coeffs = self.haar_wavelet_transform(x)
         wavelet_output = tf.einsum('bi,iod,bid->bo', x, self.wavelet_weight, wavelet_coeffs)

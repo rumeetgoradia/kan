@@ -1,85 +1,80 @@
 import tensorflow as tf
-
 from network.kan.layer import BaseKANLayer
 
-
 class LegendreKANLayer(BaseKANLayer):
-    def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0,
-                 legendre_weight=None, base_weight=None, **kwargs):
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0, **kwargs):
         super(LegendreKANLayer, self).__init__()
-        self.legendre_weight = legendre_weight
-        self.base_weight = base_weight
         self.out_features = out_features
         self.degree = degree
         self.scale_base = scale_base
         self.scale_legendre = scale_legendre
+        self.activity_regularizer = tf.keras.regularizers.L2(1e-5)
 
     def build(self, input_shape):
-        """
-        Args:
-            input_shape (tf.TensorShape): Shape of the input tensor.
-        """
         self.in_features = input_shape[-1]
         self.base_weight = self.add_weight(
             name="base_weight",
             shape=(self.in_features, self.out_features),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_base),
-            dtype=tf.float64,
+            initializer=tf.keras.initializers.GlorotUniform(),
+            dtype=tf.float32,
             trainable=True
         )
         self.legendre_weight = self.add_weight(
             name="legendre_weight",
             shape=(self.in_features, self.out_features, self.degree + 1),
-            initializer=tf.keras.initializers.VarianceScaling(scale=self.scale_legendre),
-            dtype=tf.float64,
+            initializer=tf.keras.initializers.GlorotUniform(),
+            dtype=tf.float32,
             trainable=True
         )
 
+    @tf.function
     def legendre_basis(self, x):
-        """
-        Compute Legendre polynomial basis functions.
-        Args:
-            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
-        Returns:
-            tf.Tensor: Legendre polynomial values of shape (batch_size, in_features, degree + 1).
-        """
-        # Normalize x to the range [-1, 1]
-        x_norm = 2.0 * (x - tf.reduce_min(x, axis=-1, keepdims=True)) / (
-                tf.reduce_max(x, axis=-1, keepdims=True) - tf.reduce_min(x, axis=-1, keepdims=True)) - 1.0
+        x_min = tf.reduce_min(x, axis=-1, keepdims=True)
+        x_max = tf.reduce_max(x, axis=-1, keepdims=True)
+        x_norm = 2.0 * (x - x_min) / (x_max - x_min + tf.keras.backend.epsilon()) - 1.0
+
         legendre_polys = [tf.ones_like(x_norm), x_norm]
         for n in range(2, self.degree + 1):
             p_n = ((2 * n - 1) * x_norm * legendre_polys[-1] - (n - 1) * legendre_polys[-2]) / n
             legendre_polys.append(p_n)
+
         return tf.stack(legendre_polys, axis=-1)
 
     @tf.function
     def call(self, x):
-        """
-        Args:
-            x (tf.Tensor): Input tensor of shape (batch_size, in_features).
-        Returns:
-            tf.Tensor: Output tensor of shape (batch_size, out_features).
-        """
-        x = tf.cast(x, tf.float64)
-        base_output = tf.keras.activations.swish(x) @ self.base_weight
+        # Compute base output
+        base_output = tf.matmul(x, self.base_weight)
+        base_output = tf.nn.silu(base_output)
+
+        # Compute Legendre output
         legendre_basis = self.legendre_basis(x)
         legendre_output = tf.einsum('bi,iod,bid->bo', x, self.legendre_weight, legendre_basis)
-        return base_output + legendre_output
 
-    def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
-        """
-        Args:
-            regularize_activation (float): Weight for activation regularization.
-            regularize_entropy (float): Weight for entropy regularization.
-        Returns:
-            tf.Tensor: Regularization loss.
-        """
-        l1_fake = tf.reduce_mean(tf.abs(self.legendre_weight), axis=-1)
-        regularization_loss_activation = tf.reduce_sum(l1_fake)
-        p = l1_fake / regularization_loss_activation
-        regularization_loss_entropy = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
-        return (regularize_activation * regularization_loss_activation
-                + regularize_entropy * regularization_loss_entropy)
+        output = base_output + legendre_output
+        return output
+
+    @tf.function
+    def regularization_loss(self):
+        # L1-like regularization for base_weight
+        base_l1 = tf.reduce_sum(tf.abs(self.base_weight))
+
+        # L1-like regularization for legendre_weight
+        legendre_l1 = tf.reduce_sum(tf.abs(self.legendre_weight))
+
+        # Combine regularization losses
+        total_l1 = base_l1 + legendre_l1
+
+        # Entropy regularization
+        p_base = tf.abs(self.base_weight) / (total_l1 + tf.keras.backend.epsilon())
+        p_legendre = tf.abs(self.legendre_weight) / (total_l1 + tf.keras.backend.epsilon())
+
+        entropy_base = -tf.reduce_sum(p_base * tf.math.log(p_base + tf.keras.backend.epsilon()))
+        entropy_legendre = -tf.reduce_sum(p_legendre * tf.math.log(p_legendre + tf.keras.backend.epsilon()))
+
+        return total_l1 + entropy_base + entropy_legendre
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0], self.out_features
 
     def get_config(self):
         config = super(LegendreKANLayer, self).get_config()
@@ -88,8 +83,6 @@ class LegendreKANLayer(BaseKANLayer):
             'degree': self.degree,
             'scale_base': self.scale_base,
             'scale_legendre': self.scale_legendre,
-            'legendre_weight': self.legendre_weight,
-            'base_weight': self.base_weight
         })
         return config
 

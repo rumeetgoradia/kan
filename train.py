@@ -189,7 +189,7 @@ def main(model_name, model_save_directory:str=None, history_save_directory:str=N
         if not os.path.exists(model_save_directory):
             os.makedirs(model_save_directory)
 
-        model_name.save(os.path.join(model_save_directory, MODEL_FILE_NAME(model_name)))
+        model.save(os.path.join(model_save_directory, MODEL_FILE_NAME(model_name)))
         logger.info(f"Model saved to {model_save_directory}")
 
     if history_save_directory is not None:

@@ -196,7 +196,7 @@ def main(model_name, model_save_directory:str=None, history_save_directory:str=N
         if not os.path.exists(history_save_directory):
             os.makedirs(history_save_directory)
 
-        with open(os.path.join(f'{model_name}_history.json', 'w')) as f:
+        with open(os.path.join(f'{model_name}_history.json'), 'w') as f:
             json.dump(history_dict, f)
             logger.info(f"History saved to {model_name}_history.json")
 

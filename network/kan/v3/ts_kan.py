@@ -88,10 +88,10 @@ class TimeSeriesKANV3(tf.keras.Model):
             loss = self.compiled_loss(y, predictions)
 
             # Add regularization loss from each KAN layer
-            reg_loss = sum(layer.regularization_loss() for layer in self.kan_layers)
-            total_loss = loss + reg_loss
+            # reg_loss = sum(layer.regularization_loss() for layer in self.kan_layers)
+            # loss = loss + reg_loss
 
-        gradients = tape.gradient(total_loss, self.trainable_variables)
+        gradients = tape.gradient(loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         # Update metrics

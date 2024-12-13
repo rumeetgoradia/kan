@@ -8,7 +8,7 @@ LOOKAHEAD = 5
 OUTPUT_FEATURES = ['Open', 'Close', 'Volume']
 
 # Model parameters
-BATCH_SIZE = 32
+BATCH_SIZE = 256
 EPOCHS = 100
 LEARNING_RATE = 0.001
 

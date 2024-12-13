@@ -4,7 +4,7 @@ from network.kan.layer import BaseKANLayer
 
 
 class ChebyshevKANLayer(BaseKANLayer):
-    def __init__(self, out_features, degree=5, scale_base=1.0, scale_cheb=1.0, **kwargs):
+    def __init__(self, out_features, degree=5, scale_base=1.0, scale_cheb=1.0, in_features=None, **kwargs):
         super(ChebyshevKANLayer, self).__init__(**kwargs)
         self.out_features = out_features
         self.degree = degree

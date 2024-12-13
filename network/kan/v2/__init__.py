@@ -1,2 +1,2 @@
-from .ts_kan import TimeSeriesKAN
-__all__ = ["TimeSeriesKAN"]
+from .ts_kan import TimeSeriesKANV2
+__all__ = ["TimeSeriesKANV2"]

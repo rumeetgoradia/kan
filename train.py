@@ -12,7 +12,7 @@ from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError, RootMe
 from constants import *
 from data import *
 from network import ThreeDimensionalR2Score, LSTMNetwork, MLPNetwork
-from network.kan.v2 import TimeSeriesKAN
+from network.kan.v3 import TimeSeriesKANV3
 from network.kan.layer import *
 
 # Set up logging
@@ -67,18 +67,12 @@ def create_kan_model(input_shape, lookahead, num_output_features, kan_type, kan_
     else:
         raise ValueError(f"Unsupported KAN type: {kan_type}")
 
-    model = TimeSeriesKAN(
+    model = TimeSeriesKANV3(
         hidden_size=hidden_size,
         lookahead=lookahead,
         num_output_features=num_output_features,
         kan_layer=kan_layer,
-        num_lstm_layers=num_lstm_layers,
-        num_transformer_layers=num_transformer_layers,
-        lstm_kwargs=None,
         dropout_rate=dropout_rate,
-        output_activation=output_activation,
-        num_heads=num_heads,
-        dff=dff
     )
     return model
 

@@ -1,11 +1,13 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.python.keras.models import load_model
+from tensorflow.keras.models import load_model
+
+from network import ThreeDimensionalR2Score
 
 
 class LSTMNetwork(keras.Model):
-    def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2):
+    def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2, **kwargs):
         super(LSTMNetwork, self).__init__()
         self.input_shape = input_shape
         self.lookahead = lookahead

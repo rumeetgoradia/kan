@@ -3,7 +3,7 @@ from network.kan.layer import BaseKANLayer
 import numpy as np
 
 class FourierKANLayer(BaseKANLayer):
-    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0, **kwargs):
+    def __init__(self, out_features, num_frequencies=5, scale_base=1.0, scale_fourier=1.0, in_features=None, **kwargs):
         super(FourierKANLayer, self).__init__(**kwargs)
         self.out_features = out_features
         self.num_frequencies = num_frequencies

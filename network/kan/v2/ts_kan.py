@@ -1,17 +1,16 @@
 import tensorflow as tf
-from tensorflow.python.keras.models import load_model
+from tensorflow.keras.models import load_model
 from network.kan.layer import BaseKANLayer
-from .positional_encoding import PositionalEncoding
-from .multi_head_attention import MultiHeadAttentionLayer
-from .transformer_encoder import TransformerEncoderLayer
+from network.kan.common import *
 from network import ThreeDimensionalR2Score
 from network.kan.layer import *
 
-class TimeSeriesKAN(tf.keras.Model):
+
+class TimeSeriesKANV2(tf.keras.Model):
     def __init__(self, hidden_size, lookahead, num_output_features, kan_layer, num_lstm_layers=1,
                  num_transformer_layers=1, lstm_kwargs=None, dropout_rate=0.1, output_activation=None,
                  num_heads=8, dff=256, **kwargs):
-        super(TimeSeriesKAN, self).__init__()
+        super(TimeSeriesKANV2, self).__init__()
 
         self.hidden_size = hidden_size
         self.lookahead = lookahead
@@ -30,8 +29,10 @@ class TimeSeriesKAN(tf.keras.Model):
         self.kan_layer = kan_layer
 
         self.positional_encoding = PositionalEncoding(position=1000, d_model=hidden_size)
-        self.lstm_layers = [tf.keras.layers.LSTM(hidden_size, return_sequences=True, **self.lstm_kwargs) for _ in range(num_lstm_layers)]
-        self.transformer_layers = [TransformerEncoderLayer(hidden_size, num_heads, dff, dropout_rate) for _ in range(num_transformer_layers)]
+        self.lstm_layers = [tf.keras.layers.LSTM(hidden_size, return_sequences=True, **self.lstm_kwargs) for _ in
+                            range(num_lstm_layers)]
+        self.transformer_layers = [TransformerEncoderLayer(hidden_size, num_heads, dff, dropout_rate) for _ in
+                                   range(num_transformer_layers)]
 
         self.attention = MultiHeadAttentionLayer(hidden_size, num_heads)
         self.output_layer = tf.keras.layers.Dense(num_output_features * lookahead, activation=output_activation)
@@ -98,7 +99,7 @@ class TimeSeriesKAN(tf.keras.Model):
         return tf.concat(output_sequence, axis=1)
 
     def get_config(self):
-        config = super(TimeSeriesKAN, self).get_config()
+        config = super(TimeSeriesKANV2, self).get_config()
         config.update({
             'hidden_size': self.hidden_size,
             'lookahead': self.lookahead,
@@ -122,7 +123,7 @@ class TimeSeriesKAN(tf.keras.Model):
 
     def save(self, filepath, **kwargs):
         # Save the model using the Keras save method
-        super(TimeSeriesKAN, self).save(filepath, **kwargs)
+        super(TimeSeriesKANV2, self).save(filepath, **kwargs)
 
     @classmethod
     def load(cls, filepath, **kwargs):

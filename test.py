@@ -1,27 +1,23 @@
 import argparse
 import json
+import logging
 import os
-import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import tensorflow as tf
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from tensorflow.keras.models import load_model
-
-from network import ThreeDimensionalR2Score
-from network.kan.v1 import TimeSeriesKAN, TimeSeriesKANAttentionLayer
-from network.kan.layer import *
 from tensorflow.keras.metrics import MeanSquaredError, MeanAbsoluteError, RootMeanSquaredError
-import logging
+
 from constants import *
 from data import *
+from network import ThreeDimensionalR2Score, LSTMNetwork, MLPNetwork
+from network.kan.v2 import TimeSeriesKANV2
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 def get_data(stock_market_data_filepath, ticker_splits_filepath, sequence_length, lookahead, output_features,
              batch_size):
@@ -34,25 +30,22 @@ def get_data(stock_market_data_filepath, ticker_splits_filepath, sequence_length
 
     logger.info("Creating testing dataset...")
     test = create_sequenced_tf_dataset(split_dataframes[TEST_KEY], sequence_length, lookahead,
-                                        output_features, batch_size)
+                                       output_features, batch_size)
 
     return test
 
-def load_and_compile_model(model_path, learning_rate):
-    logger.info(f"Loading model from {model_path}...")
-    custom_objects = {
-        'BaseKANLayer': BaseKANLayer,
-        'BSplineKANLayer': BSplineKANLayer,
-        'ChebyshevKANLayer': ChebyshevKANLayer,
-        'FourierKANLayer': FourierKANLayer,
-        'LegendreKANLayer': LegendreKANLayer,
-        'TimeSeriesKAN': TimeSeriesKAN,
-        'AttentionLayer': TimeSeriesKANAttentionLayer,
-        'CustomR2Score': ThreeDimensionalR2Score
-    }
 
-    # Load the model with custom objects
-    model = load_model(model_path, custom_objects=custom_objects, compile=False)
+def load_and_compile_model(model_name: str, models_directory: str, learning_rate: float):
+    model_path = os.path.join(models_directory, MODEL_FILE_NAME(model_name))
+
+    if model_name == 'lstm':
+        model = LSTMNetwork.load(model_path)
+    elif model_name == 'mlp':
+        model = MLPNetwork.load(model_path)
+    elif model_name.startswith('kan-'):
+        model = TimeSeriesKANV2.load(model_path)
+    else:
+        raise ValueError(f"Invalid model type: {model_name}")
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate, clipnorm=1.0)
     model.compile(
@@ -92,24 +85,23 @@ def calculate_scores(y_true, y_pred):
         'R2_per_feature': r2_scores
     }
 
-def main(model_name:str, models_directory:str, save_directory:str=None):
+
+def main(model_name: str, models_directory: str, save_directory: str = None):
     # Load the test data
     test_data, _, _ = get_data(stock_market_data_filepath=STOCK_MARKET_DATA_FILEPATH,
-                         ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
-                         output_features=OUTPUT_FEATURES,
-                         lookahead=LOOKAHEAD,
-                         sequence_length=SEQUENCE_LENGTH,
-                         batch_size=BATCH_SIZE
-                         )
+                               ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
+                               output_features=OUTPUT_FEATURES,
+                               lookahead=LOOKAHEAD,
+                               sequence_length=SEQUENCE_LENGTH,
+                               batch_size=BATCH_SIZE
+                               )
 
     # Load the model
-    model_path = os.path.join(models_directory, MODEL_FILE_NAME(model_name))
-    model = load_and_compile_model(model_path, LEARNING_RATE)
+    model = load_and_compile_model(model_name, models_directory, LEARNING_RATE)
 
     # Evaluate the model on the dataset
     logger.info("Evaluating model...")
     results = model.evaluate(test_data, verbose=1, return_dict=True)
-
 
     if save_directory is not None:
         # Define the path for the JSON file
@@ -122,6 +114,7 @@ def main(model_name:str, models_directory:str, save_directory:str=None):
             json.dump(results, json_file, indent=4)
             logger.info(f"Metrics saved to {scores_path}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test a model.")
     parser.add_argument("model_type",
@@ -131,5 +124,3 @@ if __name__ == "__main__":
     parser.add_argument("--save-dir", type=str, required=False, help="Directory to save the model metrics")
     args = parser.parse_args()
     main(args.model_type, args.models_dir, args.save_dir)
-
-

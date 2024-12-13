@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
@@ -11,39 +12,41 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def process_and_scale_market_data(commodities_csv_file_path: str, indices_csv_file_path: str, output_file_path: str):
+def process_and_scale_market_data(commodities_csv_file_path: str, indices_csv_file_path: str, output_file_path: str,
+                                  earliest_date=None, latest_date=None):
     if os.path.exists(output_file_path):
         logger.info(f"Output file {output_file_path} already exists. Loading from file.")
         return pd.read_csv(output_file_path, parse_dates=['Date'], index_col='Date')
 
     logger.info("Processing and scaling market data...")
-    commodities_csv = pd.read_csv(commodities_csv_file_path)
-    indices_csv = pd.read_csv(indices_csv_file_path)
+    indices = pd.read_csv(indices_csv_file_path)
 
-    indices_csv = indices_csv[
+    indices = indices[
         ['Date', 'Dow Jones (^DJI)', 'Nasdaq (^IXIC)', 'S&P500 (^GSPC)', 'NYSE Composite (^NYA)',
          'Russell 2000 (^RUT)', 'CBOE Volitility (^VIX)', 'Treasury Yield 5 Years (^FVX)',
          'Treasury Bill 13 Week (^IRX)', 'Treasury Yield 10 Years (^TNX)',
          'Treasury Yield 30 Years (^TYX)']]
 
-    indices_csv.columns = ['Date', '^DJI', '^IXIC', '^GSPC', '^NYA', '^RUT', '^VIX', '^FVX', '^IRX', '^TNX', '^TYX']
+    indices.columns = ['Date', '^DJI', '^IXIC', '^GSPC', '^NYA', '^RUT', '^VIX', '^FVX', '^IRX', '^TNX', '^TYX']
 
-    csv1_pivot = commodities_csv.pivot(index='date', columns='ticker', values='close').reset_index()
+    indices.sort_values(by='Date', inplace=True)
+    indices.set_index('Date', inplace=True)
+    indices = indices.ffill()
+    indices = indices.dropna(how='any')
 
-    merged = pd.merge(csv1_pivot, indices_csv, left_on='date', right_on='Date', how='outer')
-    merged.sort_values(by='Date', inplace=True)
-    merged.set_index('Date', inplace=True)
-    merged = merged.drop(columns=['date'], errors='ignore')
-    merged = merged.ffill()
-    merged = merged.dropna(how='any')
+    # Apply date filtering if earliest_date or latest_date is provided
+    if earliest_date:
+        indices = indices[indices.index >= earliest_date]
+    if latest_date:
+        indices = indices[indices.index <= latest_date]
 
     scaler = MinMaxScaler()
-    merged.loc[:, merged.columns] = scaler.fit_transform(merged)
+    indices.loc[:, indices.columns] = scaler.fit_transform(indices)
 
-    merged.to_csv(output_file_path)
+    indices.to_csv(output_file_path)
     logger.info(f"Processed and scaled data saved to {output_file_path}")
 
-    return merged
+    return indices
 
 
 def generate_scaled_stock_data(market_data, symbols_file_path, output_file_path):
@@ -134,6 +137,7 @@ def generate_scaled_stock_data(market_data, symbols_file_path, output_file_path)
 
 
 if __name__ == '__main__':
-    market_df = process_and_scale_market_data('raw/commodities.csv', 'raw/indices.csv', 'processed/market.csv')
+    market_df = process_and_scale_market_data('raw/commodities.csv', 'raw/indices.csv', 'processed/market.csv',
+                                              earliest_date='2016-01-01')
     stocks_df = generate_scaled_stock_data(market_df, 'raw/sp500.txt', 'processed/stock_market.csv')
     print(stocks_df.head())

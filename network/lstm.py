@@ -1,12 +1,10 @@
-import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.models import load_model
-
-from network import ThreeDimensionalR2Score
 
 
 class LSTMNetwork(keras.Model):
+    NAME = 'lstm'
+
     def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2, **kwargs):
         super(LSTMNetwork, self).__init__()
         self.input_shape = input_shape
@@ -43,12 +41,4 @@ class LSTMNetwork(keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
-    @classmethod
-    def load(cls, filepath, **kwargs):
-        # Load the model using the Keras load method
-        custom_objects = {
-            'LSTMNetwork': cls,
-            'ThreeDimensionalR2Score': ThreeDimensionalR2Score,
-        }
-        model = load_model(filepath, custom_objects=custom_objects, compile=False, **kwargs)
-        return model
+    # TODO add custom load objects

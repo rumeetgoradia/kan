@@ -74,7 +74,7 @@ def create_split_dataframes(splits: Dict[str, List[str]], stock_data: pd.DataFra
     Returns:
     Dict[str, pd.DataFrame]: A dictionary with 'train', 'val', 'test' as keys and their respective dataframes as values.
     """
-    logger.info("Creating split dataframes")
+    logger.info("Creating split dataframes...")
     split_dfs = {}
 
     for split_name, tickers in splits.items():

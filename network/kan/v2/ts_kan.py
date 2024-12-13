@@ -1,9 +1,9 @@
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 from network.kan.layer import BaseKANLayer
-from network.kan.common import *
+from .common import *
 from network import ThreeDimensionalR2Score
-from network.kan.layer import *
+from .layer import *
 
 
 class TimeSeriesKANV2(tf.keras.Model):

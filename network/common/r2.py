@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow.keras.metrics import R2Score
 
 
-class ThreeDimensionalR2Score(R2Score):
+class ThreeDimensionalR2Score(tf.keras.metrics.R2Score):
     def __init__(self, name='three_dimensional_r2_score', **kwargs):
         super(ThreeDimensionalR2Score, self).__init__(name=name, **kwargs)
 

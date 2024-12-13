@@ -1,114 +1,123 @@
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from network.kan.layer import *
-from network.kan.common import *
-from network import ThreeDimensionalR2Score
+from keras.src.layers import Flatten, Reshape
+from tensorflow.keras.layers import LSTM, Dropout, Dense
+
+from .layer import *
 
 
 class TimeSeriesKANV3(tf.keras.Model):
-    def __init__(self, hidden_size, lookahead, num_output_features, kan_layer, dropout_rate=0.1, **kwargs):
+    NAME = 'kan'
+    ALLOWED_KAN_LAYERS = ['bspline', 'chebyshev', 'legendre', 'wavelet', 'fourier']
+
+    def __init__(self, seq_length, num_features, lookahead, num_outputs, lstm_units_list, kan_units_list,
+                 kan_layer_type, dropout_rate=0.2):
         super(TimeSeriesKANV3, self).__init__()
 
-        self.hidden_size = hidden_size
+        self.seq_length = seq_length
+        self.num_features = num_features
         self.lookahead = lookahead
-        self.num_output_features = num_output_features
+        self.num_outputs = num_outputs
         self.dropout_rate = dropout_rate
+        self.lstm_units_list = lstm_units_list
+        self.kan_units_list = kan_units_list
+        self.kan_layer_type = kan_layer_type
 
-        if not isinstance(kan_layer, BaseKANLayer):
-            raise TypeError("kan_layer must be an instance of BaseKANLayer")
+        # Define LSTM layers and corresponding dropout layers
+        self.lstm_layers = []
+        self.dropout_layers = []
+        for units in lstm_units_list:
+            self.lstm_layers.append(LSTM(units, return_sequences=True))
+            self.dropout_layers.append(Dropout(self.dropout_rate))
 
-        self.kan_layer = kan_layer
+        # Flatten layer
+        self.flatten = Flatten()
 
-        # Simplified architecture
-        self.positional_encoding = PositionalEncoding(position=1000, d_model=hidden_size)
-        self.lstm_layer = tf.keras.layers.LSTM(hidden_size, return_sequences=True)
-        self.transformer_layer = TransformerEncoderLayer(hidden_size, num_heads=4, dff=128, rate=dropout_rate)
+        # Define KAN layers
+        self.kan_layers = []
+        input_dim = seq_length * lstm_units_list[-1]
+        for units in kan_units_list:
+            self.kan_layers.append(self._create_kan_layer(input_dim, units))
+            input_dim = units
 
-        self.attention = MultiHeadAttentionLayer(hidden_size, num_heads=4)
-        self.output_layer = tf.keras.layers.Dense(num_output_features * lookahead)
-        self.dropout = tf.keras.layers.Dropout(dropout_rate)
+        # Final output layer
+        self.output_layer = Dense(lookahead * num_outputs)
 
-        self.input_projection = tf.keras.layers.Dense(hidden_size)
+        # Reshape layer
+        self.reshape = Reshape((lookahead, num_outputs))
+
+    def _create_kan_layer(self, in_features, out_features):
+        if self.kan_layer_type == 'bspline':
+            return BSplineKANLayer(in_features=in_features, out_features=out_features)
+        elif self.kan_layer_type == 'chebyshev':
+            return ChebyshevKANLayer(input_dim=in_features, output_dim=out_features, degree=5)
+        elif self.kan_layer_type == 'legendre':
+            return LegendreKANLayer(in_features=in_features, out_features=out_features)
+        elif self.kan_layer_type == 'wavelet':
+            return WaveletKANLayer(in_features=in_features, out_features=out_features)
+        elif self.kan_layer_type == 'fourier':
+            return FourierKANLayer(inputdim=in_features, outdim=out_features)
+        else:
+            raise ValueError(f"Invalid KAN layer type: {self.kan_layer_type}")
 
     def call(self, inputs, training=False):
-        # Project input to hidden_size
-        x = self.input_projection(inputs)
+        x = inputs
+        for lstm_layer, dropout_layer in zip(self.lstm_layers, self.dropout_layers):
+            x = lstm_layer(x)
+            if training:
+                x = dropout_layer(x)
 
-        # Apply positional encoding
-        x = self.positional_encoding(x)
+        # Flatten the output from LSTM layers
+        x = self.flatten(x)
 
-        # LSTM layer
-        x = self.lstm_layer(x)
+        for kan_layer in self.kan_layers:
+            x = kan_layer(x)
 
-        # Transformer layer
-        x = self.transformer_layer(x, training=training, mask=None)
+        # Apply the final dense layer
+        x = self.output_layer(x)
 
-        # Multi-head attention
-        context_vector, _ = self.attention(x, x, x, mask=None)
-
-        # KAN layer
-        kan_out = self.dropout(self.kan_layer(context_vector[:, -1, :]))
-
-        # Output layer
-        output = self.output_layer(kan_out)
-
-        # Reshape the output
-        batch_size = tf.shape(inputs)[0]
-        output = tf.reshape(output, [batch_size, self.lookahead, self.num_output_features])
-
-        return output
+        # Reshape the output to match the target shape
+        x = self.reshape(x)
+        return x
 
     @tf.function
     def train_step(self, data):
         x, y = data
 
         with tf.GradientTape() as tape:
-            y_pred = self(x, training=True)
-            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-            loss += self.kan_layer.regularization_loss()
+            predictions = self(x, training=True)
+            loss = self.compiled_loss(y, predictions)
 
-        trainable_vars = self.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-        self.compiled_metrics.update_state(y, y_pred)
+            # Add regularization loss from each KAN layer
+            # reg_loss = sum(layer.regularization_loss() for layer in self.kan_layers)
+            # loss = loss + reg_loss
 
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+
+        # Update metrics
+        self.compiled_metrics.update_state(y, predictions)
+
+        # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
+
+    def predict_values(self, X):
+        predictions = self.predict(X)
+        return predictions.reshape(-1, self.lookahead, self.num_outputs)
 
     def get_config(self):
         config = super(TimeSeriesKANV3, self).get_config()
         config.update({
-            'hidden_size': self.hidden_size,
-            'lookahead': self.lookahead,
-            'num_output_features': self.num_output_features,
-            'kan_layer': tf.keras.utils.serialize_keras_object(self.kan_layer),
-            'dropout_rate': self.dropout_rate
+            "seq_length": self.seq_length,
+            "num_features": self.num_features,
+            "lookahead": self.lookahead,
+            "num_outputs": self.num_outputs,
+            "dropout_rate": self.dropout_rate,
+            "lstm_units_list": self.lstm_units_list,
+            "kan_units_list": self.kan_units_list,
+            "kan_layer_type": self.kan_layer_type,
         })
         return config
 
     @classmethod
     def from_config(cls, config):
-        kan_layer_config = config.pop('kan_layer')
-        kan_layer = tf.keras.utils.deserialize_keras_object(kan_layer_config)
-        return cls(kan_layer=kan_layer, **config)
-
-    def save(self, filepath, **kwargs):
-        # Save the model using the Keras save method
-        super(TimeSeriesKANV3, self).save(filepath, **kwargs)
-
-    @classmethod
-    def load(cls, filepath, **kwargs):
-        custom_objects = {
-            'TimeSeriesKAN': cls,
-            'PositionalEncoding': PositionalEncoding,
-            'MultiHeadAttentionLayer': MultiHeadAttentionLayer,
-            'TransformerEncoderLayer': TransformerEncoderLayer,
-            'BaseKANLayer': BaseKANLayer,
-            'ThreeDimensionalR2Score': ThreeDimensionalR2Score,
-            'silu': tf.nn.silu,
-            'BSplineKANLayer': BSplineKANLayer,
-            'ChebyshevKANLayer': ChebyshevKANLayer,
-            'FourierKANLayer': FourierKANLayer,
-            'LegendreKANLayer': LegendreKANLayer
-        }
-        model = load_model(filepath, custom_objects=custom_objects, compile=False, **kwargs)
-        return model
+        return cls(**config)

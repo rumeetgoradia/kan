@@ -33,9 +33,13 @@ def create_sequenced_tf_dataset(df: pd.DataFrame, sequence_length: int, lookahea
     date_column = 'Date' if 'Date' in df.columns else df.index.name
     input_features = [col for col in df.columns if col not in ['Ticker', date_column]]
 
-    # Initialize lists to store sequences
-    input_sequences = []
-    output_sequences = []
+    max_sequences = 100_000_000
+
+    # Preallocate arrays with an estimated size
+    input_sequences = np.empty((max_sequences, sequence_length, len(input_features)))
+    output_sequences = np.empty((max_sequences, lookahead, len(output_features)))
+
+    current_index = 0
 
     # Group by ticker to ensure sequences don't span multiple tickers
     for ticker, group in tqdm(df.groupby('Ticker'), desc="Sequencing tickers"):
@@ -47,15 +51,18 @@ def create_sequenced_tf_dataset(df: pd.DataFrame, sequence_length: int, lookahea
             input_seq = group[input_features].iloc[i:i + sequence_length].values
             output_seq = group[output_features].iloc[i + sequence_length:i + sequence_length + lookahead].values
 
-            input_sequences.append(input_seq)
-            output_sequences.append(output_seq)
+            # Add sequences to the preallocated arrays
+            input_sequences[current_index] = input_seq
+            output_sequences[current_index] = output_seq
+            current_index += 1
 
-    # Convert to numpy arrays
-    input_array = np.array(input_sequences)
-    output_array = np.array(output_sequences)
+    # Trim the arrays to the actual size
+    input_sequences = input_sequences[:current_index]
+    output_sequences = output_sequences[:current_index]
 
+    logger.info("Creating TensorFlow dataset...")
     # Create TensorFlow dataset
-    dataset = tf.data.Dataset.from_tensor_slices((input_array, output_array))
+    dataset = tf.data.Dataset.from_tensor_slices((input_sequences, output_sequences))
 
     # Shuffle and batch the dataset
     dataset = dataset.shuffle(buffer_size=len(input_sequences)).batch(batch_size)

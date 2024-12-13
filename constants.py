@@ -8,7 +8,7 @@ LOOKAHEAD = 5
 OUTPUT_FEATURES = ['Open', 'Close', 'Volume']
 
 # Model parameters
-BATCH_SIZE = 32
+BATCH_SIZE = 256
 EPOCHS = 100
 LEARNING_RATE = 0.001
 
@@ -22,3 +22,5 @@ SPLIT_RATIOS = {TRAIN_KEY: 0.7, VAL_KEY: 0.15, TEST_KEY: 0.15}
 RANDOM_SEED = 42
 
 MODEL_FILE_NAME = lambda model_name: f"{model_name}_model.keras"
+TRAIN_METRICS_FILE_NAME = lambda model_name: f"{model_name}_train_metrics.json"
+TEST_METRICS_FILE_NAME = lambda model_name: f"{model_name}_test_metrics.json"

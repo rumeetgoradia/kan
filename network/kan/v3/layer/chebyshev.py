@@ -2,29 +2,41 @@ import tensorflow as tf
 
 
 class ChebyshevKANLayer(tf.keras.layers.Layer):
-    def __init__(self, input_dim, output_dim, degree, **kwargs):
+    def __init__(self, input_dim, output_dim, degree, scale_base=1.0, scale_cheby=1.0, **kwargs):
         super(ChebyshevKANLayer, self).__init__(**kwargs)
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.degree = degree
-        # Initialize Chebyshev coefficients
+        self.scale_base = scale_base
+        self.scale_cheby = scale_cheby
+        self.base_weight = self.add_weight(
+            shape=(input_dim, output_dim),
+            initializer=tf.keras.initializers.HeUniform(),
+            trainable=True,
+            name='base_weight'
+        )
         self.cheby_coeffs = self.add_weight(
             shape=(input_dim, output_dim, degree + 1),
-            initializer='random_normal',
+            initializer=tf.keras.initializers.HeUniform(),
             trainable=True,
             name='cheby_coeffs'
         )
 
     def call(self, inputs):
-        # inputs shape: (batch_size, input_dim)
         x = inputs
-        # Normalize x to [-1, 1] using tanh
-        x = tf.tanh(x)
+        # Apply base transformation
+        base_output = tf.matmul(x, self.base_weight)
+        base_output = tf.nn.silu(base_output)
+        # Normalize x to [-1, 1] using a custom normalization
+        x_min = tf.reduce_min(x, axis=-1, keepdims=True)
+        x_max = tf.reduce_max(x, axis=-1, keepdims=True)
+        x_norm = 2.0 * (x - x_min) / (x_max - x_min + 1e-8) - 1.0
         # Compute Chebyshev polynomials
-        cheby_polys = self.chebyshev_polynomials(x)
+        cheby_polys = self.chebyshev_polynomials(x_norm)
         # Compute the Chebyshev interpolation
-        y = tf.einsum('bid,iod->bo', cheby_polys, self.cheby_coeffs)
-        return y
+        cheby_output = tf.einsum('bid,iod->bo', cheby_polys, self.cheby_coeffs)
+        # Combine base and Chebyshev outputs
+        return self.scale_base * base_output + self.scale_cheby * cheby_output
 
     def chebyshev_polynomials(self, x):
         # x shape: (batch_size, input_dim)
@@ -38,7 +50,9 @@ class ChebyshevKANLayer(tf.keras.layers.Layer):
         config.update({
             'input_dim': self.input_dim,
             'output_dim': self.output_dim,
-            'degree': self.degree
+            'degree': self.degree,
+            'scale_base': self.scale_base,
+            'scale_cheby': self.scale_cheby
         })
         return config
 

@@ -3,11 +3,14 @@ import tensorflow as tf
 
 
 class WaveletKANLayer(tf.keras.layers.Layer):
-    def __init__(self, in_features, out_features, wavelet_type='mexican_hat', with_bn=True, **kwargs):
+    def __init__(self, in_features, out_features, wavelet_type='mexican_hat',
+                 scale_base=1.0, scale_wavelet=1.0, with_bn=True, **kwargs):
         super(WaveletKANLayer, self).__init__(**kwargs)
         self.in_features = in_features
         self.out_features = out_features
         self.wavelet_type = wavelet_type
+        self.scale_base = scale_base
+        self.scale_wavelet = scale_wavelet
         self.with_bn = with_bn
         # Parameters for wavelet transformation
         self.scale = self.add_weight(shape=(out_features, in_features),
@@ -18,11 +21,11 @@ class WaveletKANLayer(tf.keras.layers.Layer):
                                            initializer='zeros',
                                            trainable=True,
                                            name='translation')
-        # Weights for linear transformation
-        self.weight1 = self.add_weight(shape=(out_features, in_features),
-                                       initializer=tf.keras.initializers.HeUniform(),
-                                       trainable=True,
-                                       name='weight1')
+        # Base weights for linear transformation
+        self.base_weight = self.add_weight(shape=(in_features, out_features),
+                                           initializer=tf.keras.initializers.HeUniform(),
+                                           trainable=True,
+                                           name='base_weight')
         self.wavelet_weights = self.add_weight(shape=(out_features, in_features),
                                                initializer=tf.keras.initializers.HeUniform(),
                                                trainable=True,
@@ -33,8 +36,7 @@ class WaveletKANLayer(tf.keras.layers.Layer):
             self.bn = tf.keras.layers.BatchNormalization()
 
     def wavelet_transform(self, x):
-        # x shape: (batch_size, in_features)
-        x_expanded = tf.expand_dims(x, 1)  # (batch_size, 1, in_features)
+        x_expanded = tf.expand_dims(x, 1)
         translation_expanded = tf.expand_dims(self.translation, 0)
         scale_expanded = tf.expand_dims(self.scale, 0)
         x_scaled = (x_expanded - translation_expanded) / scale_expanded
@@ -72,9 +74,14 @@ class WaveletKANLayer(tf.keras.layers.Layer):
 
     def call(self, inputs):
         # inputs shape: (batch_size, in_features)
-        wavelet_output = self.wavelet_transform(inputs)
-        base_output = tf.matmul(inputs, self.weight1, transpose_b=True)
-        combined_output = wavelet_output + base_output
+        x = inputs
+        # Compute base output
+        base_output = tf.matmul(x, self.base_weight)
+        base_output = self.base_activation(base_output)
+        # Compute wavelet output
+        wavelet_output = self.wavelet_transform(x)
+        # Combine base and wavelet outputs
+        combined_output = self.scale_base * base_output + self.scale_wavelet * wavelet_output
         # Apply batch normalization
         if self.with_bn:
             combined_output = self.bn(combined_output)
@@ -84,12 +91,16 @@ class WaveletKANLayer(tf.keras.layers.Layer):
         return t * 4 * (35 - 84 * t + 70 * t * 2 - 20 * t ** 3)
 
     def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
-        # L1 regularization on wavelet weights
-        l1_loss = tf.reduce_mean(tf.abs(self.wavelet_weights))
+        # L1 regularization on base and wavelet weights
+        base_l1 = tf.reduce_sum(tf.abs(self.base_weight))
+        wavelet_l1 = tf.reduce_sum(tf.abs(self.wavelet_weights))
+        total_l1 = base_l1 + wavelet_l1
         # Entropy regularization
-        p = tf.abs(self.wavelet_weights) / (tf.reduce_sum(tf.abs(self.wavelet_weights)) + 1e-10)
-        entropy_loss = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
-        return regularize_activation * l1_loss + regularize_entropy * entropy_loss
+        p_base = tf.abs(self.base_weight) / (total_l1 + 1e-10)
+        p_wavelet = tf.abs(self.wavelet_weights) / (total_l1 + 1e-10)
+        entropy_base = -tf.reduce_sum(p_base * tf.math.log(p_base + 1e-10))
+        entropy_wavelet = -tf.reduce_sum(p_wavelet * tf.math.log(p_wavelet + 1e-10))
+        return regularize_activation * total_l1 + regularize_entropy * (entropy_base + entropy_wavelet)
 
     def get_config(self):
         config = super(WaveletKANLayer, self).get_config()
@@ -97,6 +108,8 @@ class WaveletKANLayer(tf.keras.layers.Layer):
             'in_features': self.in_features,
             'out_features': self.out_features,
             'wavelet_type': self.wavelet_type,
+            'scale_base': self.scale_base,
+            'scale_wavelet': self.scale_wavelet,
             'with_bn': self.with_bn
         })
         return config

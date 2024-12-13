@@ -7,7 +7,8 @@ from network import ThreeDimensionalR2Score
 
 class MLPNetwork(keras.Model):
     def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2):
-        super(MLPNetwork, self).__init__(input_shape)
+        super(MLPNetwork, self).__init__()
+        self.input_shape = input_shape
         self.lookahead = lookahead
         self.num_output_features = num_output_features
 

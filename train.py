@@ -160,14 +160,15 @@ def main(model_type, model_save_directory: str = None, history_save_directory: s
         if not os.path.exists(model_save_directory):
             os.makedirs(model_save_directory)
 
-        model_save_filepath = model.save(os.path.join(model_save_directory, MODEL_FILE_NAME(model_type)))
+        model_save_filepath = os.path.join(model_save_directory, MODEL_FILE_NAME(model_type))
+        model.save(model_save_filepath)
         logger.info(f"Model saved to {model_save_filepath}")
 
     if history_save_directory is not None:
         if not os.path.exists(history_save_directory):
             os.makedirs(history_save_directory)
 
-        history_save_filepath = os.path.join(history_save_directory, TEST_METRICS_FILE_NAME(model_type))
+        history_save_filepath = os.path.join(history_save_directory, TRAIN_METRICS_FILE_NAME(model_type))
         with open(history_save_filepath, 'w') as f:
             json.dump(history_dict, f)
             logger.info(f"History saved to {history_save_filepath}")

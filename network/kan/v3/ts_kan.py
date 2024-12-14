@@ -10,7 +10,7 @@ class TimeSeriesKANV3(tf.keras.Model):
     ALLOWED_KAN_LAYERS = ['bspline', 'chebyshev', 'legendre', 'wavelet', 'fourier']
 
     def __init__(self, seq_length, num_features, lookahead, num_outputs, lstm_units_list, kan_units_list,
-                 kan_layer_type, dropout_rate=0.2):
+                 kan_layer_type, dropout_rate=0.2, **kwargs):
         super(TimeSeriesKANV3, self).__init__()
 
         self.seq_length = seq_length

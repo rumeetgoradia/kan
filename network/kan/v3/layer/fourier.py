@@ -11,7 +11,7 @@ class FourierKANLayer(tf.keras.layers.Layer):
         self.scale_base = scale_base
         self.scale_fourier = scale_fourier
 
-        # Initialize base weights for linear transformation
+        # Initialize base weights
         self.base_weight = self.add_weight(
             shape=(inputdim, outdim),
             initializer=tf.keras.initializers.HeUniform(),
@@ -24,7 +24,7 @@ class FourierKANLayer(tf.keras.layers.Layer):
             stddev=1.0 / (np.sqrt(inputdim) * np.sqrt(self.gridsize))
         )
         self.fouriercoeffs = self.add_weight(
-            shape=(2, outdim, inputdim, gridsize),
+            shape=(outdim, 2, inputdim, gridsize),
             initializer=initializer,
             trainable=True,
             name='fouriercoeffs'
@@ -39,24 +39,21 @@ class FourierKANLayer(tf.keras.layers.Layer):
         base_output = tf.nn.silu(base_output)
 
         # Generate k values
-        k = tf.reshape(tf.range(1, self.gridsize + 1, dtype=tf.float32), [1, 1, 1, self.gridsize])
-
-        # Reshape x for broadcasting
-        x_reshaped = tf.reshape(x, [x.shape[0], 1, x.shape[1], 1])
+        k = tf.range(1, self.gridsize + 1, dtype=tf.float32)
+        k = tf.reshape(k, [1, 1, self.gridsize])
 
         # Compute cosine and sine components
-        c = tf.cos(k * x_reshaped)
-        s = tf.sin(k * x_reshaped)
+        x_expanded = tf.expand_dims(x, axis=-1)  # (batch_size, inputdim, 1)
+        kx = k * x_expanded  # (batch_size, inputdim, gridsize)
 
-        # Reshape for einsum
-        c = tf.reshape(c, [1, x.shape[0], x.shape[1], self.gridsize])
-        s = tf.reshape(s, [1, x.shape[0], x.shape[1], self.gridsize])
+        c = tf.cos(kx)
+        s = tf.sin(kx)
 
         # Combine cosine and sine components
-        cs_combined = tf.concat([c, s], axis=0)
+        cs_combined = tf.stack([c, s], axis=1)  # (batch_size, 2, inputdim, gridsize)
 
         # Compute Fourier output
-        fourier_output = tf.einsum('dbik,djik->bj', cs_combined, self.fouriercoeffs)
+        fourier_output = tf.einsum('bnik,onik->bo', cs_combined, self.fouriercoeffs)
 
         # Combine base and Fourier outputs
         output = self.scale_base * base_output + self.scale_fourier * fourier_output

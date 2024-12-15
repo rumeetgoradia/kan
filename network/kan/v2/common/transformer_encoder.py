@@ -1,3 +1,7 @@
+"""
+rg3072
+"""
+
 import tensorflow as tf
 from .multi_head_attention import MultiHeadAttentionLayer
 

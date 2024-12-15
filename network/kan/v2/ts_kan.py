@@ -1,6 +1,9 @@
+"""
+rg3072
+"""
+
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from network.kan.layer import BaseKANLayer
 from .common import *
 from network import ThreeDimensionalR2Score
 from .layer import *

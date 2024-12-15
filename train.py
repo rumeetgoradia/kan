@@ -1,3 +1,7 @@
+"""
+rg3072
+"""
+
 import argparse
 import json
 import logging
@@ -124,8 +128,8 @@ def train_model(model, train_data, val_data, epochs):
 def main(model_type, model_save_directory: str = None, history_save_directory: str = None):
     tf.keras.backend.set_floatx('float32')
 
-    data = get_data(stock_market_data_filepath=STOCK_MARKET_DATA_FILEPATH,
-                    ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
+    data = get_data(stock_market_data_filepath='data/processed/stock_market.csv',
+                    ticker_splits_filepath='data/processed/ticker_splits.json',
                     output_features=OUTPUT_FEATURES,
                     lookahead=LOOKAHEAD,
                     sequence_length=SEQUENCE_LENGTH,

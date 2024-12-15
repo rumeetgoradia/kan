@@ -14,22 +14,6 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Data Preparation
-
-This project will be compressed with the necessary data. In case you need to re-process the data, you can access the
-indices data from [Kaggle](https://www.kaggle.com/datasets/asimislam/30-yrs-stock-market-data).
-
-Save the data in `data/raw` as `indices.csv`. The existing `sp500.txt` file will contain all tickers in the S&P 500
-index.
-
-Update the arguments in the `__main__` function of `preprocess.py` and run the script to generate the necessary data.
-
-To reinitialize the data, the files under `data/processed` can be deleted.
-
-> Note: During training, a `ticker_splits.json` file will be created in the `data/processed` directory if it does not
-> already exist. This file maintains the training, validation, and testing splits across all data, so that every model
-> is trained, validated, and tested with the same data.
-
 ## Usage
 
 The enabled model types are:
@@ -70,3 +54,25 @@ run as follows:
 ```bash
 python analysis/compile.py --models_dir ../results/models --train_metrics_dir ../results/metrics/train --test_metrics_dir ../results/metrics/test
 ```
+
+### References
+
+The following open-source libraries are heavily utilized throughout the codebase, as documented in the 
+`requirements.txt` file:
+
+- `TensorFlow` + `Keras`
+- `NumPy`
+- `Pandas`
+- `SciPy` + `scikit-learn`
+- `Matplotlib`
+- `Seaborn` 
+
+Additionally, the following repositories were used as inspiration for the KAN layers:
+
+- B-spline: [`efficient-kan`](https://github.com/Blealtan/efficient-kan/)
+- Chebyshev: [`ChebyKAN`](https://github.com/SynodicMonth/ChebyKAN)
+- Fourier: [`FourierKAN`](https://github.com/GistNoesis/FourierKAN)
+- Wavelet: [`EasyTSF`](https://github.com/2448845600/EasyTSF/)
+
+All files in the codebase were written by me, as denoted by the CUID at the top of each file. KAN layer references are
+mentioned in those comments where applicable.

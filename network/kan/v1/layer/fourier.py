@@ -1,5 +1,11 @@
+"""
+rg3072
+
+Inspired by FourierKAN (https://github.com/GistNoesis/FourierKAN)
+"""
+
 import tensorflow as tf
-from network.kan.layer import BaseKANLayer
+from network.kan.v1.layer import BaseKANLayer
 import numpy as np
 
 class FourierKANLayer(BaseKANLayer):

@@ -1,3 +1,7 @@
+"""
+rg3072
+"""
+
 import tensorflow as tf
 from keras.src.layers import Flatten, Reshape
 from tensorflow.keras.layers import LSTM, Dropout, Dense

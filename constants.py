@@ -1,9 +1,9 @@
-# Data
+"""
+rg3072
+"""
+
 from network import LSTMNetwork, MLPNetwork
 from network.kan.v3 import TimeSeriesKANV3
-
-STOCK_MARKET_DATA_FILEPATH = 'data/processed/stock_market.csv'
-TICKER_SPLITS_FILEPATH = 'data/processed/ticker_splits.json'
 
 # Data processing
 SEQUENCE_LENGTH = 30

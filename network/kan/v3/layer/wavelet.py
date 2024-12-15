@@ -1,3 +1,9 @@
+"""
+rg3072
+
+Inspired by EasyTSF (https://github.com/2448845600/EasyTSF)
+"""
+
 import math
 import tensorflow as tf
 

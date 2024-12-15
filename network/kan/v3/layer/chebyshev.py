@@ -1,3 +1,9 @@
+"""
+rg3072
+
+Inspired by ChebyKAN (https://github.com/SynodicMonth/ChebyKAN)
+"""
+
 import tensorflow as tf
 
 

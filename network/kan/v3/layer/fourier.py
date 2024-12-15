@@ -1,3 +1,9 @@
+"""
+rg3072
+
+Inspired by FourierKAN (https://github.com/GistNoesis/FourierKAN)
+"""
+
 import tensorflow as tf
 
 

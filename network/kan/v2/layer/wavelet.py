@@ -1,7 +1,13 @@
+"""
+rg3072
+
+Inspired by EasyTSF (https://github.com/2448845600/EasyTSF)
+"""
+
 import numpy as np
 import tensorflow as tf
 
-from network.kan.layer import BaseKANLayer
+from network.kan.v2.layer import BaseKANLayer
 
 
 class WaveletKANLayer(BaseKANLayer):

@@ -1,3 +1,9 @@
+"""
+rg3072
+
+Inspired by efficient-kan (https://github.com/Blealtan/efficient-kan)
+"""
+
 import tensorflow as tf
 
 

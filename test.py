@@ -1,3 +1,7 @@
+"""
+rg3072
+"""
+
 import argparse
 import json
 import logging
@@ -83,8 +87,8 @@ def main(model_name: str, models_directory: str, metrics_save_directory: str = N
     log_layer_weights(model)
 
     # Load the test data
-    test_data, _, _ = get_data(stock_market_data_filepath=STOCK_MARKET_DATA_FILEPATH,
-                               ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
+    test_data, _, _ = get_data(stock_market_data_filepath='data/processed/stock_market.csv',
+                               ticker_splits_filepath='data/processed/ticker_splits.json',
                                output_features=OUTPUT_FEATURES,
                                lookahead=LOOKAHEAD,
                                sequence_length=SEQUENCE_LENGTH,

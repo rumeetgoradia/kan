@@ -1,6 +1,12 @@
+"""
+rg3072
+
+Inspired by ChebyKAN (https://github.com/SynodicMonth/ChebyKAN)
+"""
+
 import tensorflow as tf
 
-from network.kan.layer import BaseKANLayer
+from network.kan.v1.layer import BaseKANLayer
 
 
 class ChebyshevKANLayer(BaseKANLayer):

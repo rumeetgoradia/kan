@@ -1,5 +1,11 @@
+"""
+rg3072
+
+Inspired by efficient-kan (https://github.com/Blealtan/efficient-kan)
+"""
+
 import tensorflow as tf
-from network.kan.layer import BaseKANLayer
+from network.kan.v1.layer import BaseKANLayer
 
 class BSplineKANLayer(BaseKANLayer):
     def __init__(

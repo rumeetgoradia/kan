@@ -1,5 +1,9 @@
+"""
+rg3072
+"""
+
 import tensorflow as tf
-from network.kan.layer import BaseKANLayer
+from network.kan.v2.layer import BaseKANLayer
 
 class LegendreKANLayer(BaseKANLayer):
     def __init__(self, out_features, degree=5, scale_base=1.0, scale_legendre=1.0, in_features=None, **kwargs):

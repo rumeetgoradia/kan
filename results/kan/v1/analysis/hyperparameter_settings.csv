@@ -1,4 +1,0 @@
-LSTM Units,Dense Units,Learning Rate,Model
-64.0,15,0.00025,lstm
-,15,6.25e-05,mlp
-64.0,15,1.525879e-08,kan-fourier

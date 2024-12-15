@@ -2,7 +2,7 @@
 .idea/
 __pycache__/
 
-# Ignore all directories under data/
-data/*/
-# But don't ignore Python files directly under data/
-!data/*.py
+data/processed/*.csv
+data/raw/indices.csv
+
+analysis/compiled

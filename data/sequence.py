@@ -60,7 +60,6 @@ def create_sequenced_tf_dataset(df: pd.DataFrame, sequence_length: int, lookahea
     input_sequences = input_sequences[:current_index]
     output_sequences = output_sequences[:current_index]
 
-    logger.info("Creating TensorFlow dataset...")
     # Create TensorFlow dataset
     dataset = tf.data.Dataset.from_tensor_slices((input_sequences, output_sequences))
 

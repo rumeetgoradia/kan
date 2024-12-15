@@ -117,3 +117,22 @@ class WaveletKANLayer(tf.keras.layers.Layer):
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+
+    def get_weights(self):
+        return [self.scale, self.translation, self.base_weight, self.wavelet_weights]
+
+    def set_weights(self, weights):
+        if len(weights) != 4:
+            raise ValueError(f"Expected 4 weight arrays, got {len(weights)}")
+        if weights[0].shape != self.scale.shape:
+            raise ValueError(f"Expected scale shape {self.scale.shape}, got {weights[0].shape}")
+        if weights[1].shape != self.translation.shape:
+            raise ValueError(f"Expected translation shape {self.translation.shape}, got {weights[1].shape}")
+        if weights[2].shape != self.weight1.shape:
+            raise ValueError(f"Expected weight1 shape {self.weight1.shape}, got {weights[2].shape}")
+        if weights[3].shape != self.wavelet_weights.shape:
+            raise ValueError(f"Expected wavelet_weights shape {self.wavelet_weights.shape}, got {weights[3].shape}")
+        self.scale.assign(weights[0])
+        self.translation.assign(weights[1])
+        self.weight1.assign(weights[2])
+        self.wavelet_weights.assign(weights[3])

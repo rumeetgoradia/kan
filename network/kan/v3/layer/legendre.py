@@ -95,3 +95,16 @@ class LegendreKANLayer(tf.keras.layers.Layer):
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+
+    def get_weights(self):
+        return [self.base_weight, self.legendre_weight]
+
+    def set_weights(self, weights):
+        if len(weights) != 2:
+            raise ValueError(f"Expected 2 weight arrays, got {len(weights)}")
+        if weights[0].shape != self.base_weight.shape:
+            raise ValueError(f"Expected base_weight shape {self.base_weight.shape}, got {weights[0].shape}")
+        if weights[1].shape != self.legendre_weight.shape:
+            raise ValueError(f"Expected legendre_weight shape {self.legendre_weight.shape}, got {weights[1].shape}")
+        self.base_weight.assign(weights[0])
+        self.legendre_weight.assign(weights[1])

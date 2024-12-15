@@ -1,13 +1,12 @@
-import numpy as np
 import tensorflow as tf
 
 
 class FourierKANLayer(tf.keras.layers.Layer):
-    def __init__(self, inputdim, outdim, gridsize=300, scale_base=1.0, scale_fourier=1.0, **kwargs):
+    def __init__(self, inputdim, outdim, gridsize=64, scale_base=1.0, scale_fourier=1.0, **kwargs):
         super(FourierKANLayer, self).__init__(**kwargs)
         self.inputdim = inputdim
         self.outdim = outdim
-        self.gridsize = gridsize
+        self.gridsize = min(gridsize, inputdim)  # Ensure gridsize doesn't exceed inputdim
         self.scale_base = scale_base
         self.scale_fourier = scale_fourier
 
@@ -20,16 +19,14 @@ class FourierKANLayer(tf.keras.layers.Layer):
         )
 
         # Initialize Fourier coefficients
-        initializer = tf.keras.initializers.RandomNormal(
-            stddev=1.0 / (np.sqrt(inputdim) * np.sqrt(self.gridsize))
-        )
         self.fouriercoeffs = self.add_weight(
-            shape=(outdim, 2, inputdim, gridsize),
-            initializer=initializer,
+            shape=(2 * self.gridsize, self.outdim),
+            initializer=tf.keras.initializers.RandomNormal(stddev=0.01),
             trainable=True,
             name='fouriercoeffs'
         )
 
+    @tf.function
     def call(self, inputs):
         # inputs shape: (batch_size, inputdim)
         x = inputs
@@ -38,27 +35,31 @@ class FourierKANLayer(tf.keras.layers.Layer):
         base_output = tf.matmul(x, self.base_weight)
         base_output = tf.nn.silu(base_output)
 
-        # Generate k values
-        k = tf.range(1, self.gridsize + 1, dtype=tf.float32)
-        k = tf.reshape(k, [1, 1, self.gridsize])
+        # Prepare input for FFT
+        x_complex = tf.cast(x, tf.complex64)
+        x_fft = tf.signal.fft(x_complex)
 
-        # Compute cosine and sine components
-        x_expanded = tf.expand_dims(x, axis=-1)  # (batch_size, inputdim, 1)
-        kx = k * x_expanded  # (batch_size, inputdim, gridsize)
+        # Take the first 'gridsize' frequencies
+        coeffs = x_fft[:, :self.gridsize]
 
-        c = tf.cos(kx)
-        s = tf.sin(kx)
+        # Separate real and imaginary parts
+        real_coeffs = tf.math.real(coeffs)
+        imag_coeffs = tf.math.imag(coeffs)
 
-        # Combine cosine and sine components
-        cs_combined = tf.stack([c, s], axis=1)  # (batch_size, 2, inputdim, gridsize)
+        # Combine real and imaginary parts
+        fourier_features = tf.concat([real_coeffs, imag_coeffs], axis=-1)
 
         # Compute Fourier output
-        fourier_output = tf.einsum('bnik,onik->bo', cs_combined, self.fouriercoeffs)
+        fourier_output = tf.matmul(fourier_features, self.fouriercoeffs)
 
         # Combine base and Fourier outputs
         output = self.scale_base * base_output + self.scale_fourier * fourier_output
 
         return output
+
+    def get_weights(self):
+        return [self.base_weight, self.fouriercoeffs]
+
 
     def get_config(self):
         config = super(FourierKANLayer, self).get_config()

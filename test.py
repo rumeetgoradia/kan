@@ -6,7 +6,6 @@ import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 from constants import *
 from data import *
@@ -21,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 def get_data(stock_market_data_filepath, ticker_splits_filepath, sequence_length, lookahead, output_features,
              batch_size):
-    logger.info("Loading stock market data...")
+    logger.info("Loading stock market data")
     all_data = pd.read_csv(stock_market_data_filepath, parse_dates=['Date'])
 
-    logger.info("Splitting data...")
+    logger.info("Splitting data")
     ticker_splits = create_ticker_splits({'train': 0.7, 'val': 0.15, 'test': 0.15}, all_data, ticker_splits_filepath)
     split_dataframes = create_split_dataframes(ticker_splits, all_data)
 
@@ -48,6 +47,7 @@ def load_and_compile_model(model_name: str, models_directory: str):
         custom_objects['MLPNetwork'] = MLPNetwork
     elif model_name.startswith(TimeSeriesKANV3.NAME):
         custom_objects['TimeSeriesKANV3'] = TimeSeriesKANV3
+
     else:
         raise ValueError(f"Invalid model type: {model_name}")
 
@@ -55,31 +55,33 @@ def load_and_compile_model(model_name: str, models_directory: str):
     return compile_model(model=model)
 
 
-def calculate_scores(y_true, y_pred):
-    y_true_reshaped = y_true.reshape(-1, y_true.shape[-1])
-    y_pred_reshaped = y_pred.reshape(-1, y_pred.shape[-1])
+def log_layer_weights(model):
+    for layer in model.layers:
+        logger.info(f"Layer: {layer.name} (Type: {type(layer).__name__})")
 
-    # Calculate metrics
-    mse = mean_squared_error(y_true_reshaped, y_pred_reshaped)
-    mae = mean_absolute_error(y_true_reshaped, y_pred_reshaped)
-    rmse = np.sqrt(mse)
+        if isinstance(layer, tf.keras.layers.TimeDistributed):
+            # For TimeDistributed layers, we need to access the inner layer
+            inner_layer = layer.layer
+            weights = inner_layer.get_weights()
+        else:
+            weights = layer.get_weights()
 
-    # Calculate R2 score for each feature
-    r2_scores = [r2_score(y_true_reshaped[:, i], y_pred_reshaped[:, i]) for i in range(y_true.shape[-1])]
+        if not weights:
+            logger.info("  No weights in this layer.")
+        else:
+            for i, w in enumerate(weights):
+                logger.info(f"  Weight {i} shape: {w.shape}")
+                logger.info(f"  Weight {i} mean: {np.mean(w):.6f}, std: {np.std(w):.6f}")
+                logger.info(f"  Weight {i} min: {np.min(w):.6f}, max: {np.max(w):.6f}")
 
-    # Average R2 score across features
-    r2_avg = np.mean(r2_scores)
-
-    return {
-        'MSE': mse,
-        'MAE': mae,
-        'RMSE': rmse,
-        'R2': r2_avg,
-        'R2_per_feature': r2_scores
-    }
+        logger.info("")  # Add a blank line for readability
 
 
 def main(model_name: str, models_directory: str, metrics_save_directory: str = None):
+    # Load the model
+    model = load_and_compile_model(model_name, models_directory)
+    log_layer_weights(model)
+
     # Load the test data
     test_data, _, _ = get_data(stock_market_data_filepath=STOCK_MARKET_DATA_FILEPATH,
                                ticker_splits_filepath=TICKER_SPLITS_FILEPATH,
@@ -88,9 +90,6 @@ def main(model_name: str, models_directory: str, metrics_save_directory: str = N
                                sequence_length=SEQUENCE_LENGTH,
                                batch_size=BATCH_SIZE
                                )
-
-    # Load the model
-    model = load_and_compile_model(model_name, models_directory)
 
     # Evaluate the model on the dataset
     logger.info("Evaluating model...")
@@ -111,8 +110,8 @@ def main(model_name: str, models_directory: str, metrics_save_directory: str = N
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test a model.")
     parser.add_argument("model_type",
-                        choices=['lstm', 'mlp', 'kan-bspline', 'kan-chebyshev', 'kan-fourier', 'kan-legendre'],
-                        help="Type of model to use")
+                        choices=MODEL_TYPES,
+                        help="Type of model to test")
     parser.add_argument("--models-dir", type=str, required=True, help="Directory to load the model from")
     parser.add_argument("--metrics-save-dir", type=str, required=False, help="Directory to save the model metrics")
     args = parser.parse_args()

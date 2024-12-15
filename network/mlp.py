@@ -5,7 +5,7 @@ from tensorflow.keras.layers import Dense, Dropout
 class MLPNetwork(keras.Model):
     NAME = 'mlp'
 
-    def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2):
+    def __init__(self, input_shape, lookahead, num_output_features, units=64, dropout_rate=0.2, **kwargs):
         super(MLPNetwork, self).__init__()
         self.input_shape = input_shape
         self.lookahead = lookahead

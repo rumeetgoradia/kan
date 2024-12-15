@@ -69,3 +69,16 @@ class ChebyshevKANLayer(tf.keras.layers.Layer):
         entropy_loss = -tf.reduce_sum(p * tf.math.log(p + 1e-10))
 
         return regularize_activation * l1_loss + regularize_entropy * entropy_loss
+
+    def get_weights(self):
+        return [self.base_weight, self.cheby_coeffs]
+
+    def set_weights(self, weights):
+        if len(weights) != 2:
+            raise ValueError(f"Expected 2 weight arrays, got {len(weights)}")
+        if weights[0].shape != self.base_weight.shape:
+            raise ValueError(f"Expected base_weight shape {self.base_weight.shape}, got {weights[0].shape}")
+        if weights[1].shape != self.cheby_coeffs.shape:
+            raise ValueError(f"Expected cheby_coeffs shape {self.cheby_coeffs.shape}, got {weights[1].shape}")
+        self.base_weight.assign(weights[0])
+        self.cheby_coeffs.assign(weights[1])

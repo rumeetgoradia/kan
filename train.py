@@ -177,13 +177,9 @@ def main(model_type, model_save_directory: str = None, history_save_directory: s
 
 
 if __name__ == "__main__":
-    model_types = [TimeSeriesKANV3.NAME + "-" + kan for kan in TimeSeriesKANV3.ALLOWED_KAN_LAYERS]
-    model_types.append(LSTMNetwork.NAME)
-    model_types.append(MLPNetwork.NAME)
-
     parser = argparse.ArgumentParser(description="Train a model.")
     parser.add_argument("model", type=str,
-                        choices=model_types,
+                        choices=MODEL_TYPES,
                         help="Type of model to train")
     parser.add_argument("--model-save-dir", type=str, required=False, help="Directory to save the model")
     parser.add_argument("--history-save-dir", type=str, required=False,

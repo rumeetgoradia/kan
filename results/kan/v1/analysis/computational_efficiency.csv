@@ -1,4 +1,0 @@
-Model,Inference Time (s),Number of Parameters
-lstm,145.9895601272583,61647
-mlp,17.15190601348877,85199
-kan-fourier,50.388482093811035,55999

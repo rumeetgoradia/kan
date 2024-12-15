@@ -41,4 +41,3 @@ class LSTMNetwork(keras.Model):
     def from_config(cls, config):
         return cls(**config)
 
-    # TODO add custom load objects

@@ -1,6 +1,5 @@
 import logging
 import os
-from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
@@ -12,13 +11,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def process_and_scale_market_data(commodities_csv_file_path: str, indices_csv_file_path: str, output_file_path: str,
+def process_and_scale_market_data(indices_csv_file_path: str, output_file_path: str,
                                   earliest_date=None, latest_date=None):
     if os.path.exists(output_file_path):
         logger.info(f"Output file {output_file_path} already exists. Loading from file.")
         return pd.read_csv(output_file_path, parse_dates=['Date'], index_col='Date')
 
-    logger.info("Processing and scaling market data...")
+    logger.info("Processing and scaling market data")
     indices = pd.read_csv(indices_csv_file_path)
 
     indices = indices[
@@ -137,7 +136,7 @@ def generate_scaled_stock_data(market_data, symbols_file_path, output_file_path)
 
 
 if __name__ == '__main__':
-    market_df = process_and_scale_market_data('raw/commodities.csv', 'raw/indices.csv', 'processed/market.csv',
+    market_df = process_and_scale_market_data('raw/indices.csv', 'processed/market.csv',
                                               earliest_date='2016-01-01')
     stocks_df = generate_scaled_stock_data(market_df, 'raw/sp500.txt', 'processed/stock_market.csv')
     print(stocks_df.head())

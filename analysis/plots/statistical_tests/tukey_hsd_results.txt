@@ -1,0 +1,26 @@
+       Multiple Comparison of Means - Tukey HSD, FWER=0.05       
+=================================================================
+    group1        group2    meandiff p-adj   lower  upper  reject
+-----------------------------------------------------------------
+  kan-bspline kan-chebyshev  -0.0008 0.0987 -0.0017 0.0001  False
+  kan-bspline   kan-fourier  -0.0002 0.9938 -0.0011 0.0007  False
+  kan-bspline  kan-legendre  -0.0003 0.9652 -0.0012 0.0006  False
+  kan-bspline   kan-wavelet  -0.0001 0.9998  -0.001 0.0008  False
+  kan-bspline          lstm  -0.0004 0.8777 -0.0013 0.0005  False
+  kan-bspline           mlp  -0.0003 0.9624 -0.0012 0.0006  False
+kan-chebyshev   kan-fourier   0.0006  0.402 -0.0003 0.0015  False
+kan-chebyshev  kan-legendre   0.0005 0.5802 -0.0004 0.0014  False
+kan-chebyshev   kan-wavelet   0.0007 0.2265 -0.0002 0.0016  False
+kan-chebyshev          lstm   0.0004 0.7709 -0.0005 0.0013  False
+kan-chebyshev           mlp   0.0005 0.5902 -0.0004 0.0014  False
+  kan-fourier  kan-legendre  -0.0001    1.0  -0.001 0.0008  False
+  kan-fourier   kan-wavelet   0.0001 0.9999 -0.0008  0.001  False
+  kan-fourier          lstm  -0.0002 0.9978 -0.0011 0.0007  False
+  kan-fourier           mlp  -0.0001    1.0  -0.001 0.0008  False
+ kan-legendre   kan-wavelet   0.0002 0.9973 -0.0007 0.0011  False
+ kan-legendre          lstm  -0.0001 0.9999  -0.001 0.0008  False
+ kan-legendre           mlp     -0.0    1.0 -0.0009 0.0009  False
+  kan-wavelet          lstm  -0.0003 0.9755 -0.0012 0.0006  False
+  kan-wavelet           mlp  -0.0002 0.9969 -0.0011 0.0007  False
+         lstm           mlp   0.0001    1.0 -0.0008  0.001  False
+-----------------------------------------------------------------

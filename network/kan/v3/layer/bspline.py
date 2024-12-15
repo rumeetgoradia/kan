@@ -114,3 +114,28 @@ class BSplineKANLayer(tf.keras.layers.Layer):
         base_activation = tf.keras.activations.deserialize(config['base_activation'])
         config['base_activation'] = base_activation
         return cls(**config)
+
+    def get_weights(self):
+        weights = [self.base_weight, self.spline_weight]
+        if self.enable_standalone_scale_spline:
+            weights.append(self.spline_scaler)
+        return weights
+
+    def set_weights(self, weights):
+        expected_count = 3 if self.enable_standalone_scale_spline else 2
+        if len(weights) != expected_count:
+            raise ValueError(f"Expected {expected_count} weight arrays, got {len(weights)}")
+
+        if weights[0].shape != self.base_weight.shape:
+            raise ValueError(f"Expected base_weight shape {self.base_weight.shape}, got {weights[0].shape}")
+        if weights[1].shape != self.spline_weight.shape:
+            raise ValueError(f"Expected spline_weight shape {self.spline_weight.shape}, got {weights[1].shape}")
+
+        self.base_weight.assign(weights[0])
+        self.spline_weight.assign(weights[1])
+
+        if self.enable_standalone_scale_spline:
+            if weights[2].shape != self.spline_scaler.shape:
+                raise ValueError(f"Expected spline_scaler shape {self.spline_scaler.shape}, got {weights[2].shape}")
+            self.spline_scaler.assign(weights[2])
+

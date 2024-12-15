@@ -1,4 +1,7 @@
 # Data
+from network import LSTMNetwork, MLPNetwork
+from network.kan.v3 import TimeSeriesKANV3
+
 STOCK_MARKET_DATA_FILEPATH = 'data/processed/stock_market.csv'
 TICKER_SPLITS_FILEPATH = 'data/processed/ticker_splits.json'
 
@@ -24,3 +27,6 @@ RANDOM_SEED = 42
 MODEL_FILE_NAME = lambda model_name: f"{model_name}_model.keras"
 TRAIN_METRICS_FILE_NAME = lambda model_name: f"{model_name}_train_metrics.json"
 TEST_METRICS_FILE_NAME = lambda model_name: f"{model_name}_test_metrics.json"
+
+KAN_MODEL_TYPES = [TimeSeriesKANV3.NAME + "-" + kan for kan in TimeSeriesKANV3.ALLOWED_KAN_LAYERS]
+MODEL_TYPES = KAN_MODEL_TYPES + [LSTMNetwork.NAME, MLPNetwork.NAME]
